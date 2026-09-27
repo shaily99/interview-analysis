@@ -25,6 +25,7 @@ import { initSearch } from "./search.js";
 import { copySelection, hideQuoteBar, initHighlights, renderList, save } from "./highlights.js";
 import { enterEdit, exitEdit, isEditing, splitAtWord } from "./editing.js";
 import { notify, working } from "./chrome.js";
+import { initVideoCodes, videoCodeKey } from "./video_codes.js";
 
 const ctx = {
   el: {
@@ -102,11 +103,15 @@ ctx.working = (message) => working(ctx.el.notices, message);
 /* ------------------------------------------------------------------ tabs -- */
 
 ctx.showTab = (which) => {
-  const showSearch = which === "search";
-  ctx.el.panelSearch.hidden = !showSearch;
-  ctx.el.panelHighlights.hidden = showSearch;
-  ctx.el.tabSearch.setAttribute("aria-pressed", String(showSearch));
-  ctx.el.tabHighlights.setAttribute("aria-pressed", String(!showSearch));
+  const tabs = {
+    search: [ctx.el.tabSearch, ctx.el.panelSearch],
+    highlights: [ctx.el.tabHighlights, ctx.el.panelHighlights],
+    "video-codes": [$("tab-video-codes"), $("panel-video-codes")],
+  };
+  for (const [name, [tab, panel]] of Object.entries(tabs)) {
+    panel.hidden = name !== which;
+    tab.setAttribute("aria-pressed", String(name === which));
+  }
 };
 
 /* ------------------------------------------------------------ mode logic -- */
@@ -451,6 +456,7 @@ async function load() {
   initPlayer(ctx);
   initSearch(ctx);
   initHighlights(ctx);
+  initVideoCodes(ctx);
   renderList(ctx);
   // Quotes are the output of a reading session, so that is what the sidebar
   // opens on. Search is a keystroke away with `/`.
@@ -533,6 +539,7 @@ ctx.onCursorMoved = (chunk) => {
 
 ctx.onTimeUpdate = (seconds) => {
   syncFollowButton();
+  ctx.onVideoCodeTime?.(seconds);
   if (ctx.mode !== "following") return;
   const index = chunkIndexAtTime(ctx, seconds);
   if (index !== ctx.cursorIndex) setCursor(ctx, index, { scroll: true });
@@ -666,6 +673,7 @@ const TYPING = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 document.addEventListener("keydown", (event) => {
   if (TYPING.has(event.target.tagName) || event.target.isContentEditable) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (videoCodeKey(ctx, event)) return;
 
   const bound = (ctx.data?.transcript?.roster || []).find((entry) => entry.key === event.key);
   if (bound) {

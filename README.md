@@ -211,6 +211,8 @@ playback**, and a "Follow along" button appears to re-attach.
 | double-click | cut the caption in front of that word |
 | `1`…`9` | assign this block to a speaker, then move on |
 | `Esc` | clear selection |
+| `i` / `o` | start / end a [video code](#video-codes) at the playhead |
+| `x` | delete the video code under the playhead |
 
 ## Correcting the transcript
 
@@ -470,6 +472,52 @@ snapping to the caption's start — on Zoom's longer captions that is a differen
 of several seconds. By default that position is interpolated, which is a guess;
 [measuring the word timings](#word-timings) replaces it with the real thing.
 Playback seeks 0.75s early either way, so the first word is not clipped.
+
+## Video codes
+
+Quotes code what was *said*. Video codes code what *happened* — `scroll` from
+1:02 to 1:30, `hesitates` over a button — as spans of the recording's time rather
+than of its words.
+
+**They are separate from quote tags, entirely.** Their own list, their own files,
+their own place on screen. A video code and a tag can share a name without having
+anything to do with each other, and neither suggests the other's entries while you
+type. The UI always says "video code", never just "code", so the two never blur.
+
+**Marking.** Press `i` where something starts and `o` where it ends — both at the
+playhead, so it works while watching. A pulsing tick on the scrub bar shows an open
+start. `o` opens a picker over the dock listing the video codebook; type to narrow
+it, `Enter` to choose, or type a new name to add it. `Esc` in the picker keeps the
+start open, `Esc` elsewhere drops it. A code can carry its own key: with a start
+open, that key ends the span and codes it in one press. `x` deletes the span under
+the playhead, with an Undo.
+
+**Where they show.** Never on the words — that is where quotes live.
+
+- **Over the scrub bar**, a lane of coloured bars on the same scale as the bar
+  itself, overlapping spans stacked. Click a bar to go there; drag either end to
+  move that end.
+- **Down the time spine**, a thin band per span beside the blocks it covers.
+  Clicking one seeks there and opens it in the sidebar.
+- **The Video codes tab**, listing every span with its code, times and length,
+  a note, and a menu to recode it. Chips filter by code. Whatever is under the
+  playhead is marked in all three as it plays.
+
+**The codebook** is shared across the library, so a study codes consistently.
+*Manage video codes* in the tab renames, recolours, sets keys and describes what
+counts as each code. Spans refer to a code by id, so a rename is one edit that
+every span in every recording follows. A code nothing uses can be deleted; one in
+use has to be **merged** into another instead, which moves its spans first — a
+code cannot disappear out from under data. Keys the reader already uses (`j`, `k`,
+`h`, `i`, `o`, digits, …) and speaker keys cannot be code keys.
+
+**Storage.** The codebook is `library.video_codebook.json` at the library root
+(the recording folder itself when only one is open). Spans are
+`session.video_codes.json` beside each recording, in session seconds — the same
+continuous timeline as quotes, so a span can cross an interruption. Neither file
+depends on the transcript, so correcting a caption never moves a video code. Both
+are written atomically and moved aside to `.corrupt` rather than overwritten if
+they cannot be read, like every other file here.
 
 ## Finding quotes
 

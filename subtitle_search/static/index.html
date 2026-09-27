@@ -28,6 +28,7 @@
     <a class="btn" id="library-link" href="/" hidden>← Library</a>
     <button class="btn" id="tab-search" type="button" aria-pressed="false">Results</button>
     <button class="btn" id="tab-highlights" type="button" aria-pressed="true">Quotes <span class="count" id="highlight-count">0</span></button>
+    <button class="btn" id="tab-video-codes" type="button" aria-pressed="false" title="Spans of the video, coded with i and o">▶ Video codes <span class="count" id="video-code-count">0</span></button>
     <button class="btn btn--icon" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme">◐</button>
   </div>
 </header>
@@ -67,6 +68,16 @@
         <p class="empty">Select text in the transcript to save a quote. Quotes are written to a JSON file next to the recording.</p>
       </div>
     </section>
+
+    <section class="panel" id="panel-video-codes" hidden>
+      <header class="panel__head">
+        <h2 class="panel__title">Video codes</h2>
+        <span class="panel__count">i · o · x</span>
+      </header>
+      <div class="vc-manage" id="vc-manage"></div>
+      <div class="panel__filters" id="vc-filters"></div>
+      <div class="panel__body" id="vc-list"></div>
+    </section>
   </aside>
 </div>
 
@@ -79,7 +90,10 @@
   <div class="dock__bar">
     <button class="transport" id="play" type="button" aria-label="Play">▶</button>
     <span class="clock" id="clock">0:00</span>
-    <input class="scrub" id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+    <div class="scrub-wrap">
+      <div class="vc-lane" id="vc-lane" aria-label="Video codes"></div>
+      <input class="scrub" id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+    </div>
     <span class="clock clock--muted" id="duration">0:00</span>
     <label class="rate">
       <span class="rate__label">speed</span>
@@ -97,6 +111,8 @@
     <button class="btn btn--icon" id="dock-toggle" type="button" title="Expand video">▣</button>
   </div>
 </div>
+
+<div class="vc-picker" id="vc-picker" hidden></div>
 
 <div class="quotebar" id="quotebar" hidden>
   <span class="quotebar__time" id="quotebar-time">0:00</span>

@@ -464,3 +464,61 @@ def test_selection_speaker_route_recredits_the_quotes_inside_it(client):
     moved = api.get(f"/api/recordings/{rec_id}/highlights").json()["highlights"][0]
     assert moved["text"] == "share my screen"
     assert moved["speaker"] == "Jordan Reyes"
+
+
+# -- video codes ---------------------------------------------------------------
+
+
+def test_video_code_round_trip(client):
+    http, rid = client
+    code = http.post("/api/library/video-codebook", json={"name": "scroll"}).json()["code"]
+
+    created = http.post(
+        f"/api/recordings/{rid}/video-codes",
+        json={"code_id": code["id"], "start": 1, "end": 3},
+    )
+    assert created.status_code == 201
+    span = created.json()["span"]
+
+    patched = http.patch(f"/api/recordings/{rid}/video-codes/{span['id']}", json={"end": 4})
+    assert patched.json()["span"]["end"] == 4
+
+    book = http.get("/api/library/video-codebook").json()
+    assert book["codes"][0]["span_count"] == 1
+    assert http.get(f"/api/recordings/{rid}").json()["video_codes"][0]["id"] == span["id"]
+
+    assert http.delete(f"/api/recordings/{rid}/video-codes/{span['id']}").status_code == 200
+    assert http.get(f"/api/recordings/{rid}/video-codes").json()["spans"] == []
+
+
+def test_video_code_bad_requests(client):
+    http, rid = client
+    code = http.post("/api/library/video-codebook", json={"name": "scroll"}).json()["code"]
+
+    backwards = {"code_id": code["id"], "start": 3, "end": 1}
+    assert http.post(f"/api/recordings/{rid}/video-codes", json=backwards).status_code == 400
+    unknown = {"code_id": "nope", "start": 1, "end": 2}
+    assert http.post(f"/api/recordings/{rid}/video-codes", json=unknown).status_code == 400
+    assert http.post("/api/library/video-codebook", json={"name": "Scroll"}).status_code == 400
+
+
+def test_video_code_in_use_must_be_merged(client):
+    http, rid = client
+    a = http.post("/api/library/video-codebook", json={"name": "scroll"}).json()["code"]
+    b = http.post("/api/library/video-codebook", json={"name": "swipe"}).json()["code"]
+    http.post(f"/api/recordings/{rid}/video-codes", json={"code_id": a["id"], "start": 1, "end": 2})
+
+    assert http.delete(f"/api/library/video-codebook/{a['id']}").status_code == 400
+
+    merged = http.post(f"/api/library/video-codebook/{a['id']}/merge", json={"into": b["id"]})
+    assert merged.json()["moved"] == 1
+    assert [c["name"] for c in merged.json()["codes"]] == ["swipe"]
+    assert http.get(f"/api/recordings/{rid}/video-codes").json()["spans"][0]["code_id"] == b["id"]
+
+
+def test_video_codes_leave_quote_tags_alone(client):
+    http, rid = client
+    http.post("/api/library/video-codebook", json={"name": "scroll"})
+
+    assert http.get(f"/api/recordings/{rid}/highlights").json()["known_tags"] == []
+    assert all(t["tag"] != "scroll" for t in http.get("/api/library/vocabulary").json()["tags"])
