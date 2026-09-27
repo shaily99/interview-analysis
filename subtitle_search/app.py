@@ -49,6 +49,16 @@ from .media import serve_media
 from .search import regex_search, search
 from .session import Recording, RecordingRegistry
 from .timings import coverage, unmeasured
+from .video_codes import (
+    CODEBOOK_FILENAME as VIDEO_CODEBOOK_FILENAME,
+    COLORS as VIDEO_CODE_COLORS,
+    RESERVED_KEYS as VIDEO_CODE_RESERVED_KEYS,
+    VideoCodebook,
+    VideoCodeError,
+    delete_code,
+    merge_code,
+    usage_counts,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -334,6 +344,93 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
         if not recording.store.delete(highlight_id):
             raise HTTPException(status_code=404, detail="unknown highlight")
         return JSONResponse({"deleted": highlight_id})
+
+    # -- video codes: spans of time, separate from quotes and their tags ---
+
+    def codebook() -> VideoCodebook:
+        return app.state.video_codebook
+
+    def codebook_state() -> dict:
+        counts = usage_counts(registry)
+        return {
+            "codes": [{**c, "span_count": counts.get(c["id"], 0)} for c in codebook().list()],
+            "colors": list(VIDEO_CODE_COLORS),
+            "reserved_keys": sorted(VIDEO_CODE_RESERVED_KEYS),
+        }
+
+    @app.get("/api/library/video-codebook")
+    def get_video_codebook() -> dict:
+        return codebook_state()
+
+    @app.post("/api/library/video-codebook", status_code=201)
+    def add_video_code(payload: dict = Body(...)) -> dict:
+        try:
+            code = codebook().add(payload)
+        except VideoCodeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"code": code, **codebook_state()}
+
+    @app.patch("/api/library/video-codebook/{code_id}")
+    def update_video_code(code_id: str, payload: dict = Body(...)) -> dict:
+        try:
+            code = codebook().update(code_id, payload)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="unknown video code") from exc
+        except VideoCodeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"code": code, **codebook_state()}
+
+    @app.delete("/api/library/video-codebook/{code_id}")
+    def delete_video_code(code_id: str) -> dict:
+        try:
+            delete_code(registry, codebook(), code_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="unknown video code") from exc
+        except VideoCodeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"deleted": code_id, **codebook_state()}
+
+    @app.post("/api/library/video-codebook/{code_id}/merge")
+    def merge_video_code(code_id: str, payload: dict = Body(...)) -> dict:
+        try:
+            moved = merge_code(registry, codebook(), code_id, str(payload.get("into") or ""))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="unknown video code") from exc
+        except VideoCodeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"merged": code_id, "moved": moved, **codebook_state()}
+
+    @app.get("/api/recordings/{recording_id}/video-codes")
+    def list_video_codes(recording_id: str) -> dict:
+        return {"spans": require(recording_id).video_codes.list()}
+
+    @app.post("/api/recordings/{recording_id}/video-codes", status_code=201)
+    def add_video_span(recording_id: str, payload: dict = Body(...)) -> dict:
+        recording = require(recording_id)
+        try:
+            span = recording.video_codes.add(payload, codebook(), recording.transcript.duration)
+        except VideoCodeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"span": span}
+
+    @app.patch("/api/recordings/{recording_id}/video-codes/{span_id}")
+    def update_video_span(recording_id: str, span_id: str, payload: dict = Body(...)) -> dict:
+        recording = require(recording_id)
+        try:
+            span = recording.video_codes.update(
+                span_id, payload, codebook(), recording.transcript.duration
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="unknown span") from exc
+        except VideoCodeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"span": span}
+
+    @app.delete("/api/recordings/{recording_id}/video-codes/{span_id}")
+    def delete_video_span(recording_id: str, span_id: str) -> JSONResponse:
+        if not require(recording_id).video_codes.remove(span_id):
+            raise HTTPException(status_code=404, detail="unknown span")
+        return JSONResponse({"deleted": span_id})
 
     # -- the library, and the themes built across it ----------------------
 
@@ -644,6 +741,7 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
 
     root = registry.root or Path.cwd()
     app.state.themes = ThemeStore(root / THEMES_FILENAME)
+    app.state.video_codebook = VideoCodebook(root / VIDEO_CODEBOOK_FILENAME)
     app.state.vectors = VectorCache(root / EMBEDDINGS_FILENAME)
     app.state.semantics = None
     return app

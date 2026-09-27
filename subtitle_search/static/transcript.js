@@ -182,6 +182,7 @@ export function cacheGeometry(ctx) {
   ctx.chunkEls = Array.from(ctx.el.chunks.querySelectorAll(".chunk"));
   ctx.chunkTops = ctx.chunkEls.map((el) => el.offsetTop);
   ctx.chunkStarts = ctx.chunks.map((chunk) => chunk.start);
+  ctx.onGeometry?.();
 }
 
 /* ----------------------------------------------------------- highlights -- */

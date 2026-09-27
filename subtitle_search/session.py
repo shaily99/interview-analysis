@@ -26,6 +26,7 @@ from .mediainfo import container_duration
 from .models import Part, Transcript
 from .timings import WORDS_FILENAME, TimingStore, attach, word_index_map
 from .timings import coverage as timing_coverage
+from .video_codes import SPANS_FILENAME as VIDEO_CODES_FILENAME, VideoCodeStore
 from .vtt import VTTParseError, assemble_session, parse_cues, read_speakers, session_digest
 
 #: Searched in order -- video first, since the collapsible pane can show it and
@@ -266,6 +267,8 @@ class Recording:
     sources: list[str]
     #: Measured word timings, empty until alignment has been run.
     timings: TimingStore
+    #: Coded spans of the video, separate from quotes and their tags.
+    video_codes: VideoCodeStore
 
     def reload_transcript(self) -> None:
         """Re-derive the session after its transcript changed on disk.
@@ -367,6 +370,7 @@ class Recording:
             "highlights": self.store.list(),
             "known_tags": self.store.known_tags(),
             "highlights_stale": self.store.stale,
+            "video_codes": self.video_codes.list(),
             "migrated_from": self.store.migrated_from,
             # How much of the session has real timings rather than interpolated
             # ones, so the reader can be honest about which it is showing.
@@ -391,6 +395,7 @@ def open_recording(folder: Path) -> Recording:
         part_files=part_files,
         sources=sources,
         timings=TimingStore(folder / WORDS_FILENAME),
+        video_codes=VideoCodeStore(folder / VIDEO_CODES_FILENAME),
     )
 
 
