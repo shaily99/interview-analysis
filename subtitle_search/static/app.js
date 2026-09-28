@@ -25,7 +25,7 @@ import { initSearch } from "./search.js";
 import { copySelection, hideQuoteBar, initHighlights, renderList, save } from "./highlights.js";
 import { enterEdit, exitEdit, isEditing, splitAtWord } from "./editing.js";
 import { notify, working } from "./chrome.js";
-import { initVideoCodes, videoCodeKey } from "./video_codes.js";
+import { initVideoCodes, reloadVideoCodes, videoCodeKey } from "./video_codes.js";
 
 const ctx = {
   el: {
@@ -457,6 +457,8 @@ async function load() {
   initSearch(ctx);
   initHighlights(ctx);
   initVideoCodes(ctx);
+  $("coding-link").href = `/code?recording=${encodeURIComponent(ctx.recordingId)}`;
+  window.addEventListener("focus", () => reloadVideoCodes(ctx).catch(() => {}));
   renderList(ctx);
   // Quotes are the output of a reading session, so that is what the sidebar
   // opens on. Search is a keystroke away with `/`.

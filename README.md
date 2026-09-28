@@ -486,7 +486,7 @@ type. The UI always says "video code", never just "code", so the two never blur.
 
 **Marking.** Press `i` where something starts and `o` where it ends — both at the
 playhead, so it works while watching. A pulsing tick on the scrub bar shows an open
-start. `o` opens a picker over the dock listing the video codebook; type to narrow
+start. `o` pauses playback and opens a picker over the dock listing the video codebook; the span ends where you pressed `o`, however long choosing takes. Type to narrow
 it, `Enter` to choose, or type a new name to add it. `Esc` in the picker keeps the
 start open, `Esc` elsewhere drops it. A code can carry its own key: with a start
 open, that key ends the span and codes it in one press. `x` deletes the span under
@@ -503,13 +503,29 @@ the playhead, with an Undo.
   a note, and a menu to recode it. Chips filter by code. Whatever is under the
   playhead is marked in all three as it plays.
 
+**Beside the transcript.** With **Codes beside text** on (the default; the
+choice is remembered), each span is also listed in a column right of the text:
+its start time, code and length, set at the height of that moment in the
+transcript so it lines up with the block timestamps. Entries that would collide
+are nudged down rather than reordered. Turning it off hides both the column and
+the spine bands, leaving the text alone. The column needs a wide window and
+hides below about 60rem, like the spine.
+
+**Coding without the transcript.** **▶ Code video** in the reader opens `/code`,
+a view with just the video, filling the window, and the Video codes panel. It
+uses the same keys (`i`, `o`, `x`, `Space`, `←`/`→`, `[`/`]`), adds `,`/`.` for
+one-second steps, and has a **mute** button (`m`, remembered) for coding what is
+on screen rather than what is said. It reads and writes the same files as the
+reader, and each page re-reads them when it regains focus, so the two can be
+open side by side.
+
 **The codebook** is shared across the library, so a study codes consistently.
 *Manage video codes* in the tab renames, recolours, sets keys and describes what
 counts as each code. Spans refer to a code by id, so a rename is one edit that
 every span in every recording follows. A code nothing uses can be deleted; one in
 use has to be **merged** into another instead, which moves its spans first — a
-code cannot disappear out from under data. Keys the reader already uses (`j`, `k`,
-`h`, `i`, `o`, digits, …) and speaker keys cannot be code keys.
+code cannot disappear out from under data. Keys the reader and the coding view already use (`j`, `k`,
+`h`, `i`, `o`, `m`, digits, …) and speaker keys cannot be code keys.
 
 **Storage.** The codebook is `library.video_codebook.json` at the library root
 (the recording folder itself when only one is open). Spans are
@@ -605,6 +621,107 @@ parsed is reported and skipped rather than taking the whole library down.
 The library lists every recording with its duration, speakers, quote count and
 tags, and searches every transcript at once. Results link straight to the moment
 in the reader.
+
+## Sharing a study through Google Drive
+
+The tool itself never sends anything anywhere. But everything it saves is a plain
+file in the recording folder, so if that folder is synced by **Google Drive for
+desktop**, the sync client uploads each save and a collaborator sees it. Each
+person runs this fork on their own machine, pointed at their synced copy of the
+same study folder. There is no server to host.
+
+**Check your approvals first.** Syncing puts the recordings and transcripts on
+Google's servers. Make sure your IRB protocol or data management plan allows
+that, and use the Google account it covers (usually the institutional one). If
+Drive is not allowed, the steps are the same for any synced folder that is,
+such as Box.
+
+### One-time setup, for each person
+
+1. **Install this fork.**
+
+   ```bash
+   git clone https://github.com/shaily99/interview-analysis.git
+   cd interview-analysis
+   uv sync
+   ```
+
+   Later, `git pull` picks up changes to the fork.
+
+2. **Install Google Drive for desktop.** Download it from
+   <https://www.google.com/drive/download/> or run `brew install --cask google-drive`,
+   then sign in. On Apple silicon Macs, approve the system extension under
+   **System Settings → Privacy & Security** if asked.
+
+3. **Get the study folder.** The owner shares the study folder (for example
+   `pilots/`) with each collaborator, with **Editor** access. A collaborator who
+   has it under *Shared with me* adds it to their own drive with
+   **Organize → Add shortcut → My Drive** in the web view, so it appears on
+   disk.
+
+4. **Keep it on disk.** In Finder, right-click the study folder and choose
+   **Available offline**. By default Drive streams files on demand, which is fine
+   for small JSON files but not for scrubbing through an 80 MB video.
+
+### Folder layout
+
+The study folder is the library: one folder per participant, with the shared
+codebook next to them.
+
+```
+pilots/                           ← point the tool here
+  library.video_codebook.json     ← the video code list, shared by every recording
+  library.themes.json             ← themes, if you use /themes
+  P'1/
+    GMT…_Recording.mp4
+    GMT…_Recording.transcript.vtt ← each folder needs a .vtt to open
+  P'2/
+    …
+    session.highlights.json       ← quotes
+    session.video_codes.json      ← video code spans
+    session.words.json            ← measured word timings
+    audio…_original.vtt           ← backup written on the first correction
+```
+
+Folders without a `.vtt` are skipped, and Google Docs shortcuts (`.gdoc`) are
+ignored. When you move a recording in, bring its `session.*.json` files and
+`_original.vtt` with it, and keep `library.video_codebook.json` at the top of
+the study folder. Spans refer to codes by id, so a span whose codebook stayed
+behind shows as *unknown code*.
+
+### Running it
+
+Drive mounts under `~/Library/CloudStorage/`. Quote the path, because it has
+spaces and participant folders often have apostrophes:
+
+```bash
+uv run subtitle-search "$HOME/Library/CloudStorage/GoogleDrive-<you@example.edu>/My Drive/<path>/pilots"
+```
+
+Point it at the **study folder**, not a participant folder. Opened on its own, a
+participant folder gets its own codebook, which nobody else's recordings see.
+
+The tool reads the folder when it starts. To see what a collaborator saved,
+wait for Drive to finish syncing (the menu-bar icon), then restart the tool with
+Ctrl+C and the command again. In the reader and the coding view, switching back
+to the tab also re-reads the video codes.
+
+### Taking turns
+
+Right now two people cannot safely work on the **same recording at the same
+time**. Every quote, correction and video code for a recording lives in shared
+files, and Drive does not merge JSON. If two saves cross, one person's changes
+are lost, or Drive keeps both versions as a duplicate file (for example
+`session.video_codes (1).json`) that the tool does not read. Editing the
+codebook while someone else does has the same risk.
+
+Until per-coder files exist (see [Not built yet](#not-built-yet)):
+
+- Split the work by recording: each person codes different participant folders.
+- Before starting a recording, let Drive finish syncing. When done, keep the
+  tool running for a few seconds so the last save uploads.
+- If a file like `… (1).json` appears, the two versions conflicted. Compare them
+  by hand before deleting either one.
 
 ## Themes: analysis across recordings
 
@@ -962,3 +1079,9 @@ byte-exact HTTP Range serving.
 Multi-recording library search. The backend is already namespaced by recording
 id with a registry, so adding it means writing a folder scanner and a fan-out
 search — not restructuring.
+
+Per-coder video codes for shared folders. Each coder enters their name, and their
+spans go to their own `session.video_codes.<name>.json`, so two people never
+write the same file. An **independent** mode shows only your own codes, for
+coding blind. A **collaborative** mode shows everyone's, labelled by coder, with
+other people's read-only. Changes on disk are picked up without a restart.

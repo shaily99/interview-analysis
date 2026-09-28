@@ -36,10 +36,10 @@ SPANS_FILENAME = "session.video_codes.json"
 #: a video code should never be mistaken for a highlight.
 COLORS = ("blue", "orange", "green", "magenta", "slate", "gold", "cyan", "brick")
 
-#: Keys the reader already uses. A code hotkey that shadowed one would silently
+#: Keys the reader and the coding view already use. A code hotkey that shadowed one would silently
 #: stop that key working. Speaker keys are checked in the browser, since the
 #: roster lives in each transcript rather than here.
-RESERVED_KEYS = frozenset("jkhcefs/[]iox 0123456789")
+RESERVED_KEYS = frozenset("jkhcefs/[]iox,.m 0123456789")
 
 
 class VideoCodeError(ValueError):

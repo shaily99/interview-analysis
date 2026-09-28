@@ -11,10 +11,12 @@
  * span and codes it in one press.
  */
 
-import { $, api, escapeHtml, formatTime } from "./util.js";
+import { $, api, escapeHtml, formatTime, recall, remember } from "./util.js";
 import { seek } from "./player.js";
 
 const esc = escapeHtml;
+
+const SIDE_KEY = "subtitle-search:videoCodesBesideText";
 
 export function initVideoCodes(ctx) {
   ctx.vc = {
@@ -23,9 +25,11 @@ export function initVideoCodes(ctx) {
     reserved: [],
     spans: ctx.data.video_codes || [],
     pending: null,     // session time of an `i` not yet closed by `o`
+    out: null,         // session time of that `o`, while its code is being chosen
     filter: null,      // code id the list is narrowed to
     managing: false,   // codebook editor open
     active: new Set(), // span ids under the playhead
+    side: recall(SIDE_KEY, "on") === "on", // shown beside the transcript
   };
   Object.assign(ctx.el, {
     tabVideoCodes: $("tab-video-codes"),
@@ -36,9 +40,20 @@ export function initVideoCodes(ctx) {
     vcManage: $("vc-manage"),
     vcLane: $("vc-lane"),
     vcPicker: $("vc-picker"),
+    vcSideToggle: $("vc-side-toggle"),
   });
 
-  ctx.el.tabVideoCodes.addEventListener("click", () => ctx.showTab("video-codes"));
+  // The coding view has the panel on its own, with no tabs and no transcript.
+  ctx.el.tabVideoCodes?.addEventListener("click", () => ctx.showTab("video-codes"));
+  if (ctx.el.vcSideToggle) {
+    syncSideToggle(ctx);
+    ctx.el.vcSideToggle.addEventListener("click", () => {
+      ctx.vc.side = !ctx.vc.side;
+      remember(SIDE_KEY, ctx.vc.side ? "on" : "off");
+      syncSideToggle(ctx);
+      renderBands(ctx);
+    });
+  }
   ctx.el.panelVideoCodes.addEventListener("click", (event) => onPanelClick(ctx, event));
   ctx.el.panelVideoCodes.addEventListener("change", (event) => onPanelChange(ctx, event));
   ctx.el.vcLane.addEventListener("pointerdown", (event) => onLanePointer(ctx, event));
@@ -49,6 +64,24 @@ export function initVideoCodes(ctx) {
   refreshCodebook(ctx).catch((error) =>
     ctx.notify(`Could not load the video codebook: ${error.message}`, { kind: "warn" })
   );
+}
+
+function syncSideToggle(ctx) {
+  ctx.el.vcSideToggle.setAttribute("aria-pressed", String(ctx.vc.side));
+  ctx.el.transcript?.classList.toggle("transcript--vc-side", ctx.vc.side);
+}
+
+/**
+ * Re-read spans and codebook from disk.
+ *
+ * The coding view and the reader are separate pages, often open side by side,
+ * so whichever one comes back into focus picks up what the other one wrote.
+ */
+export async function reloadVideoCodes(ctx) {
+  if (!ctx.vc || ctx.vc.pending != null || !ctx.el.vcPicker.hidden) return;
+  const { spans } = await api(`/api/recordings/${ctx.recordingId}/video-codes`);
+  ctx.vc.spans = spans;
+  await refreshCodebook(ctx);
 }
 
 async function refreshCodebook(ctx, state) {
@@ -96,6 +129,11 @@ export function videoCodeKey(ctx, event) {
       ctx.notify("Press i first to mark where the video code starts.");
       return true;
     }
+    // Pause while choosing, so the moment being coded is still on screen and
+    // nothing plays past unwatched. The end is fixed here, at the keypress, not
+    // whenever the choice is made.
+    ctx.vc.out = ctx.currentTime;
+    ctx.el.media.pause();
     openPicker(ctx);
     return true;
   }
@@ -122,15 +160,16 @@ function spansAt(ctx, t) {
   return ctx.vc.spans.filter((s) => s.start <= t && t < s.end);
 }
 
-/** `o` was pressed: the span is [pending, now], in whichever order they came. */
+/** The span is [start, end], in whichever order `i` and `o` came. */
 function bounds(ctx) {
   const a = ctx.vc.pending;
-  const b = ctx.currentTime;
+  const b = ctx.vc.out ?? ctx.currentTime;
   return a <= b ? [a, b] : [b, a];
 }
 
 async function closeSpan(ctx, code) {
   const [start, end] = bounds(ctx);
+  ctx.vc.out = null;
   if (end - start < 0.1) {
     ctx.notify("That span is empty — play on a little before pressing o.");
     return;
@@ -217,11 +256,14 @@ function openPicker(ctx) {
       : `<p class="vc-picker__none">Type a name to create the first video code.</p>`;
   };
   const close = () => {
+    ctx.vc.out = null; // a later `o` sets a new end; the start stays open
     picker.hidden = true;
     picker.innerHTML = "";
   };
   const choose = async (item) => {
+    const end = ctx.vc.out;
     close();
+    ctx.vc.out = end;
     let code = item;
     if (item.create) {
       try {
@@ -232,6 +274,7 @@ function openPicker(ctx) {
         await refreshCodebook(ctx, result);
         code = codeOf(ctx, result.code.id);
       } catch (error) {
+        ctx.vc.out = null;
         ctx.notify(`Could not add that code: ${error.message}`, { kind: "warn" });
         return;
       }
@@ -382,8 +425,9 @@ function yAt(ctx, t) {
 
 function renderBands(ctx) {
   const host = ctx.el.transcript;
-  host.querySelectorAll(".vc-band").forEach((el) => el.remove());
-  if (!ctx.vc || !ctx.chunkEls?.length) return;
+  if (!host) return;
+  host.querySelectorAll(".vc-band, .vc-side").forEach((el) => el.remove());
+  if (!ctx.vc || !ctx.vc.side || !ctx.chunkEls?.length) return;
   const { placed } = stack(ctx.vc.spans);
   const fragment = document.createDocumentFragment();
   for (const span of ctx.vc.spans) {
@@ -402,12 +446,47 @@ function renderBands(ctx) {
     band.addEventListener("click", (event) => {
       event.stopPropagation();
       seek(ctx, span.start);
-      ctx.showTab("video-codes");
+      ctx.showTab?.("video-codes");
       revealSpan(ctx, span.id);
     });
     fragment.appendChild(band);
   }
+  fragment.appendChild(sideColumn(ctx));
   host.appendChild(fragment);
+}
+
+/* A labelled entry per span in a column right of the text, each set at the
+ * height of its start -- the same place the transcript's own timestamp for that
+ * moment sits. Entries that would overlap are nudged down, never reordered. */
+const SIDE_ROW = 20;
+
+function sideColumn(ctx) {
+  const column = document.createElement("div");
+  column.className = "vc-side";
+  let floor = -Infinity;
+  for (const span of [...ctx.vc.spans].sort((a, b) => a.start - b.start)) {
+    const code = codeOf(ctx, span.code_id);
+    const top = Math.max(yAt(ctx, span.start), floor);
+    floor = top + SIDE_ROW;
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `vc-side__item vc--${code ? code.color : "slate"}${ctx.vc.active.has(span.id) ? " vc-side__item--active" : ""}`;
+    item.dataset.span = span.id;
+    item.style.top = `${top}px`;
+    item.innerHTML =
+      `<time>${formatTime(span.start)}</time><span class="vc-swatch"></span>` +
+      `<span class="vc-side__name">${esc(code ? code.name : "unknown code")}</span>` +
+      `<span class="vc-side__len">${formatDuration(span.end - span.start)}</span>`;
+    item.title = `▶ ${code ? code.name : "unknown code"} · ${formatTime(span.start)}–${formatTime(span.end)}${span.note ? ` — ${span.note}` : ""}`;
+    item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      seek(ctx, span.start);
+      ctx.showTab?.("video-codes");
+      revealSpan(ctx, span.id);
+    });
+    column.appendChild(item);
+  }
+  return column;
 }
 
 /* ------------------------------------------------------ active marking -- */
@@ -423,6 +502,7 @@ function markActive(ctx, seconds) {
     el.classList.toggle("vc-bar--active", on && el.classList.contains("vc-bar"));
     el.classList.toggle("vc-band--active", on && el.classList.contains("vc-band"));
     el.classList.toggle("vc-item--active", on && el.classList.contains("vc-item"));
+    el.classList.toggle("vc-side__item--active", on && el.classList.contains("vc-side__item"));
   }
 }
 

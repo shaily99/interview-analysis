@@ -522,3 +522,11 @@ def test_video_codes_leave_quote_tags_alone(client):
 
     assert http.get(f"/api/recordings/{rid}/highlights").json()["known_tags"] == []
     assert all(t["tag"] != "scroll" for t in http.get("/api/library/vocabulary").json()["tags"])
+
+
+def test_coding_view_is_served(client):
+    http, _ = client
+    page = http.get("/code")
+    assert page.status_code == 200
+    assert "coding.js" in page.text
+    assert page.headers["cache-control"] == "no-cache"
