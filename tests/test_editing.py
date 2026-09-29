@@ -201,6 +201,7 @@ def test_unchanged_text_is_a_no_op(recording):
 def _quote(recording, cue_id, start, end):
     cue = recording.transcript.cue(cue_id)
     return recording.store.create(
+        "tester",
         {
             "text": cue.text[start:end],
             "start_cue_id": cue_id,
@@ -404,6 +405,7 @@ def test_reassigning_leaves_the_words_alone(one_voice):
 
 def test_quotes_stay_anchored_across_a_reassignment(one_voice):
     quote = one_voice.store.create(
+        "tester",
         {
             "text": "read the whole thing",
             "start_cue_id": "c1",
@@ -792,6 +794,7 @@ def test_a_quote_inside_an_absorbed_caption_follows_its_words(chopped):
 
 def test_a_quote_spanning_the_run_still_covers_the_same_words(chopped):
     quote = chopped.store.create(
+        "tester",
         {
             "text": "sentence chopped across three",
             "start_cue_id": "c0",

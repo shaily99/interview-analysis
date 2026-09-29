@@ -9,26 +9,26 @@
  * What the plane also gets you is the thing a column list cannot express at all.
  * Themes sit next to the themes they resemble; two areas nudged up against each
  * other is a claim you are making about them, and an outlier parked between two
- * areas is a quote you have not decided about yet. None of that is a field in the
+ * areas is a code you have not decided about yet. None of that is a field in the
  * file. It is the arrangement, and the arrangement is the analysis.
  *
  * Three ideas hold the whole thing up:
  *
- *   A card is not a quote. It is one appearance of a quote, at one position, so
- *   the same quote can be pinned inside two areas at once -- two cards, one
- *   quote. Photocopying a post-it, which is what you would do with the paper.
+ *   A card is not a code. It is one appearance of a code, at one position, so
+ *   the same code can sit inside two areas at once -- two cards, one code.
  *
  *   A card in an area is a DOM child of that area, positioned relative to it.
- *   That is what makes "themes bring their quotes with them" free rather than
+ *   That is what makes "themes bring their cards with them" free rather than
  *   bookkeeping: dragging an area changes two numbers and every card in it
  *   moves, and no card can be left behind by a bug in the moving code.
  *
  *   Every drag is the same drag. One pointer capture on the viewport, one ghost
- *   element following the cursor in screen space. Dragging a quote out of the
+ *   element following the cursor in screen space. Dragging a code out of the
  *   tray, out of one area into another, and back to the tray to put it away are
  *   the same code path, so they cannot behave differently.
  */
 
+import { coderTag, currentMode, isCommon, isMine } from "./coder.js";
 import { $, api, debounce, escapeHtml, formatTime, recall, remember } from "./util.js";
 
 const VIEW_KEY = "subtitle-search:canvas-view";
@@ -338,10 +338,10 @@ function packHeight(count, width) {
  * re-sort on every redraw of a view that writes nothing at all.
  */
 function packingKey(card) {
-  const quote = ctx.state.byRef.get(card.ref);
-  if (!quote) return [2, "", 0, ""];
-  const speaker = (quote.speaker || "").trim();
-  return [speaker ? 0 : 1, speaker.toLowerCase(), quote.start_time || 0, quote.recording_id || ""];
+  // Code cards pack alphabetically, text codes before video, as tidying does.
+  const item = ctx.state.byRef.get(card.ref);
+  if (!item) return [2, "", 0, ""];
+  return [0, (item.name || "").toLowerCase(), item.kind === "video" ? 1 : 0, ""];
 }
 
 function packingOrder(cards) {
@@ -431,31 +431,49 @@ function clampToArea(theme, x, y) {
  * of checking the context is to come back with it, and the arrangement should
  * still be there when you do.
  */
-function readerLink(quote) {
+/** A code's page, where every quote or span carrying it is listed. */
+function readerLink(item) {
   return `<a class="icon-btn" data-act="open" target="_blank" rel="noopener"
-             href="/reader?recording=${encodeURIComponent(quote.recording_id)}&t=${quote.start_time}"
-             title="Open in the transcript, in a new tab">↗</a>`;
+             href="/codebook?kind=${item.kind}&code=${encodeURIComponent(item.id)}"
+             title="Open this code's page, in a new tab">↗</a>`;
 }
 
-/** The card as it appears on the plane: short, and playable where it stands. */
-function cardMarkup(quote, card) {
-  const recording = ctx.state.recordings.get(quote.recording_id);
-  const tags = (quote.tags || []).join(", ");
+//: Code cards opened to show their quotes or spans, by card.
+const expanded = new Set();
+const cardKey = (card) => `${card.ref}|${card.theme_id || ""}`;
+const noun = (item) => (item.kind === "video" ? "span" : "quote");
+
+/** The card as it appears on the plane: a code, which opens to show its evidence. */
+function cardMarkup(item, card) {
+  const open = expanded.has(cardKey(card));
+  const uses = `${item.count} ${noun(item)}${item.count === 1 ? "" : "s"} · ${item.recordings.length} rec`;
+  const applications = open
+    ? `<ol class="ccard__apps">${item.applications
+        .map((a) => {
+          const link = item.kind === "video"
+            ? `/code?recording=${encodeURIComponent(a.recording_id)}&t=${a.start_time}`
+            : `/reader?recording=${encodeURIComponent(a.recording_id)}&t=${a.start_time}`;
+          return `<li><a href="${link}" target="_blank" rel="noopener">${escapeHtml(a.recording_title)} · ${formatTime(a.start_time)}</a>${
+            a.text ? ` ${escapeHtml(a.text)}` : ""}</li>`;
+        })
+        .join("") || "<li>Nothing carries this code yet.</li>"}</ol>`
+    : "";
   return `
-    <article class="ccard qcard--${quote.color || "amber"}"
-             data-ref="${escapeHtml(quote.ref)}"
+    <article class="ccard ccard--code vc--${escapeHtml(item.color || "slate")}${open ? " ccard--open" : ""}"
+             data-ref="${escapeHtml(item.ref)}"
              data-theme="${escapeHtml(card.theme_id || "")}"
              style="left:${card.x}px; top:${card.y}px"
              tabindex="0" role="group"
-             aria-label="${escapeHtml(quote.text.slice(0, 90))}">
-      <p class="ccard__text">${escapeHtml(quote.text)}</p>
+             aria-label="${escapeHtml(item.name)}, ${escapeHtml(uses)}">
+      <p class="ccard__text">${item.kind === "video" ? '<span class="ccard__video" title="Video code">▶</span> ' : ""}${escapeHtml(item.name)} ${coderTag(item.coder)}</p>
       <footer class="ccard__foot">
-        <span class="ccard__who">${escapeHtml(quote.speaker || recording?.title || quote.recording_id)}</span>
-        <time>${formatTime(quote.start_time)}</time>
-        <button class="icon-btn" data-act="play" type="button" title="Play this quote">▶</button>
-        ${readerLink(quote)}
+        <span class="ccard__who">${escapeHtml(uses)}</span>
+        <button class="icon-btn" data-act="expand" type="button" aria-expanded="${open}"
+                title="${open ? "Hide" : "Show"} its ${noun(item)}s">${open ? "▴" : "▾"}</button>
+        <button class="icon-btn" data-act="play" type="button" title="Play every ${noun(item)} with this code">▷</button>
+        ${readerLink(item)}
       </footer>
-      ${tags ? `<p class="ccard__tags" title="${escapeHtml(tags)}">${escapeHtml(tags)}</p>` : ""}
+      ${applications}
     </article>`;
 }
 
@@ -472,13 +490,14 @@ function cardMarkup(quote, card) {
  * quote can still be dropped on it: the theme is closed, not shut.
  */
 function areaMarkup(theme, cards) {
-  const spread = new Set(
-    cards.map((c) => ctx.state.byRef.get(c.ref)?.recording_id).filter(Boolean)
-  );
+  const spread = new Set(cards.flatMap((c) => ctx.state.byRef.get(c.ref)?.recordings || []));
+  // Whose theme this is: yours, common, or (read-only) another coder's.
+  const owner = theme.coder;
+  const readOnly = owner && !isMine(theme) && !isCommon(theme);
   const height = drawnHeight(theme);
   const shown = theme.collapsed ? [] : laidOut(theme, cards);
   return `
-    <section class="area${theme.collapsed ? " area--collapsed" : ""}"
+    <section class="area${theme.collapsed ? " area--collapsed" : ""}${isCommon(theme) ? " area--common" : ""}${readOnly ? " area--theirs" : ""}"
              data-theme="${escapeHtml(theme.id)}"
              style="left:${theme.x}px; top:${theme.y}px; width:${theme.w}px${
                height === null ? "" : `; height:${height}px`
@@ -491,21 +510,24 @@ function areaMarkup(theme, cards) {
                   title="${theme.collapsed ? "Open this theme" : "Roll this theme up to its title"}"
                   >${theme.collapsed ? "▸" : "▾"}</button>
           <textarea class="area__title" data-act="rename" rows="1" wrap="soft"
-                    spellcheck="false" aria-label="Theme name"
+                    spellcheck="false" aria-label="Theme name" ${readOnly ? "readonly" : ""}
                     >${escapeHtml(theme.title)}</textarea>
-          <span class="area__count" title="quotes in this theme">${cards.length}</span>
+          ${owner && !isMine(theme) ? coderTag(owner) : ""}
+          <span class="area__count" title="codes in this theme">${cards.length}</span>
           <span class="area__tools">
             <button class="icon-btn" data-act="play-theme" type="button"
-                    title="Play every quote in this theme">▶</button>
-            <button class="icon-btn" data-act="tidy" type="button"
-                    title="Tidy: pack these by speaker, then time, for good">⊞</button>
-            <button class="icon-btn" data-act="delete" type="button"
-                    title="Delete this area">✕</button>
+                    title="Play every quote and span in this theme">▷</button>
+            ${readOnly ? "" : `<button class="icon-btn" data-act="tidy" type="button"
+                    title="Tidy: pack these alphabetically, for good">⊞</button>`}
+            ${isMine(theme) ? `<button class="icon-btn" data-act="promote" type="button"
+                    title="Move this theme to common…">✓</button>` : ""}
+            ${readOnly ? "" : `<button class="icon-btn" data-act="delete" type="button"
+                    title="Delete this area">✕</button>`}
           </span>
         </header>
         <div class="area__sub">
           <input class="area__note" value="${escapeHtml(theme.note || "")}" data-act="note"
-                 placeholder="What is this theme?" aria-label="What this theme is">
+                 placeholder="What is this theme?" aria-label="What this theme is" ${readOnly ? "readonly" : ""}>
           <span class="area__spread">${spread.size}/${ctx.state.recordings.size} rec</span>
         </div>
       </div>
@@ -515,7 +537,7 @@ function areaMarkup(theme, cards) {
           return quote ? cardMarkup(quote, card) : "";
         })
         .join("")}
-      ${theme.collapsed || cards.length ? "" : '<p class="area__empty">Drag quotes in here.</p>'}
+      ${theme.collapsed || cards.length ? "" : '<p class="area__empty">Drag codes in here.</p>'}
       ${theme.collapsed ? "" : '<span class="area__grip" data-handle="resize" title="Resize"></span>'}
     </section>`;
 }
@@ -553,10 +575,10 @@ export function renderCanvas() {
   // Two counts, because they answer different questions: how much of the study
   // is filed, and how much is out on the plane but still undecided.
   const undecided = ctx.state.onCanvas.size - ctx.state.placed.size;
-  el.progress.textContent = ctx.state.quotes.length
-    ? `${ctx.state.placed.size} of ${ctx.state.quotes.length} in a theme` +
+  el.progress.textContent = ctx.state.codes.length
+    ? `${ctx.state.placed.size} of ${ctx.state.codes.length} codes in a theme` +
       (undecided > 0 ? ` · ${undecided} loose` : "")
-    : "no quotes saved yet";
+    : "no codes yet";
 
   fitChrome();
   renderTray();
@@ -619,37 +641,34 @@ function anyFilter(active = filters()) {
  * Every dimension is an "and": the reason to have six of them is to arrive at a
  * handful, not at a longer list.
  */
-function matches(quote, active) {
-  const tags = quote.tags || [];
-  if (active.tag === "state:any" && !tags.length) return false;
-  if (active.tag === "state:none" && tags.length) return false;
-  if (active.tag.startsWith("tag:") && !tags.includes(active.tag.slice(4))) return false;
-  if (active.speaker && (quote.speaker || "") !== active.speaker) return false;
-  if (active.recording && quote.recording_id !== active.recording) return false;
-  if (active.color && (quote.color || "amber") !== active.color) return false;
-  if (active.note === "yes" && !(quote.note || "").trim()) return false;
-  if (active.note === "no" && (quote.note || "").trim()) return false;
+function matches(item, active) {
+  // The filter bar was made for quotes; for code cards, "coded" means in use,
+  // the note is the code's description, and a recording is one it appears in.
+  if (active.tag === "state:any" && !item.count) return false;
+  if (active.tag === "state:none" && item.count) return false;
+  if (active.tag.startsWith("tag:") && item.kind !== active.tag.slice(4)) return false;
+  if (active.recording && !(item.recordings || []).includes(active.recording)) return false;
+  if (active.color && item.color !== active.color) return false;
+  if (active.note === "yes" && !(item.description || "").trim()) return false;
+  if (active.note === "no" && (item.description || "").trim()) return false;
   if (!active.text) return true;
   return (
-    quote.text.toLowerCase().includes(active.text) ||
-    (quote.note || "").toLowerCase().includes(active.text) ||
-    tags.some((tag) => tag.toLowerCase().includes(active.text)) ||
-    (quote.speaker || "").toLowerCase().includes(active.text)
+    (item.name || "").toLowerCase().includes(active.text) ||
+    (item.description || "").toLowerCase().includes(active.text)
   );
 }
 
 const SORTS = {
-  // The corpus order: recording, then time within it. Reading order, in effect.
   recording: null,
-  longest: (a, b) => b.text.length - a.text.length,
-  shortest: (a, b) => a.text.length - b.text.length,
-  tags: (a, b) => (b.tags || []).length - (a.tags || []).length,
+  longest: (a, b) => b.count - a.count,
+  shortest: (a, b) => a.count - b.count,
+  tags: (a, b) => b.recordings.length - a.recordings.length,
 };
 
 function trayQuotes() {
   const active = filters();
-  const quotes = ctx.state.quotes.filter(
-    (quote) => !ctx.state.onCanvas.has(quote.ref) && matches(quote, active)
+  const quotes = ctx.state.codes.filter(
+    (item) => !ctx.state.onCanvas.has(item.ref) && matches(item, active)
   );
   const order = SORTS[active.sort];
   return order ? [...quotes].sort(order) : quotes;
@@ -683,29 +702,14 @@ function fillFilter(select, placeholder, options) {
 function renderFilters() {
   // Counted over the whole corpus rather than the tray, so a number next to a
   // tag means the same thing whatever else is selected.
-  const counts = new Map();
-  const speakers = new Map();
-  for (const quote of ctx.state.quotes) {
-    for (const tag of quote.tags || []) counts.set(tag, (counts.get(tag) || 0) + 1);
-    const who = quote.speaker || "";
-    if (who) speakers.set(who, (speakers.get(who) || 0) + 1);
-  }
-
-  fillFilter(el.filterTag, "any tag", [
-    ["state:any", "tagged with anything"],
-    ["state:none", "not tagged at all"],
+  fillFilter(el.filterTag, "any code", [
+    ["tag:text", "text codes"],
+    ["tag:video", "▶ video codes"],
     [null, null],
-    ...[...counts.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([tag, count]) => [`tag:${tag}`, `${tag} (${count})`]),
+    ["state:any", "used somewhere"],
+    ["state:none", "not used yet"],
   ]);
-  fillFilter(
-    el.filterSpeaker,
-    "anyone",
-    [...speakers.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([who, count]) => [who, `${who} (${count})`])
-  );
+  fillFilter(el.filterSpeaker, "anyone", []);
   fillFilter(
     el.filterRecording,
     "every recording",
@@ -714,7 +718,7 @@ function renderFilters() {
   fillFilter(
     el.filterColor,
     "any colour",
-    [...new Set(ctx.state.quotes.map((q) => q.color || "amber"))].sort().map((c) => [c, c])
+    [...new Set(ctx.state.codes.map((c) => c.color || "slate"))].sort().map((c) => [c, c])
   );
 }
 
@@ -726,7 +730,7 @@ function renderTray() {
 
   el.trayCount.textContent = String(quotes.length);
   el.filterClear.hidden = !anyFilter(active);
-  const waiting = ctx.state.quotes.length - ctx.state.onCanvas.size;
+  const waiting = ctx.state.codes.filter((c) => !ctx.state.onCanvas.has(c.ref)).length;
   el.traySummary.textContent = anyFilter(active)
     ? `${quotes.length} of ${waiting} waiting`
     : `${waiting} waiting`;
@@ -734,21 +738,16 @@ function renderTray() {
   el.trayBody.innerHTML = quotes.length
     ? quotes
         .map(
-          (quote) => `
-          <article class="tray__item qcard--${quote.color || "amber"}"
-                   data-ref="${escapeHtml(quote.ref)}" tabindex="0"
+          (item) => `
+          <article class="tray__item tray__item--code vc--${escapeHtml(item.color || "slate")}"
+                   data-ref="${escapeHtml(item.ref)}" tabindex="0"
                    title="Drag onto the canvas, or press enter">
-            <p class="tray__text">${escapeHtml(quote.text)}</p>
+            <p class="tray__text">${item.kind === "video" ? "▶ " : ""}${escapeHtml(item.name)} ${coderTag(item.coder)}</p>
             <p class="tray__meta">
-              <span class="tray__who">${escapeHtml(quote.speaker || quote.recording_title || "")}</span>
-              <time>${formatTime(quote.start_time)}</time>
-              ${readerLink(quote)}
+              <span class="tray__who">${item.count} ${noun(item)}${item.count === 1 ? "" : "s"} in ${item.recordings.length} recording${item.recordings.length === 1 ? "" : "s"}</span>
+              ${readerLink(item)}
             </p>
-            ${
-              (quote.tags || []).length
-                ? `<p class="tray__tags">${escapeHtml((quote.tags || []).join(" · "))}</p>`
-                : ""
-            }
+            ${item.description ? `<p class="tray__tags">${escapeHtml(item.description)}</p>` : ""}
           </article>`
         )
         .join("")
@@ -911,10 +910,10 @@ function beginCardDrag(event, { ref, from, grabX, grabY, copy }) {
   if (!quote) return;
 
   const ghost = document.createElement("div");
-  ghost.className = `ccard ccard--ghost qcard--${quote.color || "amber"}`;
+  ghost.className = `ccard ccard--ghost ccard--code vc--${quote.color || "slate"}`;
   ghost.style.width = `${card_w * view.z}px`;
   ghost.style.height = `${card_h * view.z}px`;
-  ghost.innerHTML = `<p class="ccard__text">${escapeHtml(quote.text)}</p>`;
+  ghost.innerHTML = `<p class="ccard__text">${escapeHtml(quote.name || quote.text)}</p>`;
   document.body.appendChild(ghost);
 
   drag = {
@@ -1272,8 +1271,16 @@ async function onSurfaceClick(event) {
   const area = event.target.closest(".area");
 
   if (act === "play" && card) {
-    const quote = ctx.state.byRef.get(card.dataset.ref);
-    if (quote) ctx.startQueue([quote], quote.text.slice(0, 40));
+    const item = ctx.state.byRef.get(card.dataset.ref);
+    if (item?.applications?.length) ctx.startQueue(item.applications, item.name);
+    else if (item) ctx.notify("Nothing carries that code yet.");
+    return;
+  }
+  if (act === "expand" && card) {
+    const key = `${card.dataset.ref}|${card.dataset.theme || ""}`;
+    if (expanded.has(key)) expanded.delete(key);
+    else expanded.add(key);
+    renderCanvas();
     return;
   }
   if (!area) return;
@@ -1294,9 +1301,11 @@ async function onSurfaceClick(event) {
     return;
   }
   if (act === "play-theme") {
-    const quotes = theme.refs.map((ref) => ctx.state.byRef.get(ref)).filter(Boolean);
+    const quotes = theme.refs.flatMap((ref) => ctx.state.byRef.get(ref)?.applications || []);
     if (quotes.length) ctx.startQueue(quotes, theme.title);
-    else ctx.notify("That theme has no quotes in it yet.");
+    else ctx.notify("Nothing in that theme has a quote or span yet.");
+  } else if (act === "promote") {
+    await ctx.promoteTheme(theme);
   } else if (act === "tidy") {
     await send("/api/library/canvas/tidy", { theme_id: theme.id }, "Could not tidy that area");
   } else if (act === "delete") {
@@ -1314,6 +1323,12 @@ async function onSurfaceClick(event) {
  * live in the recordings, and without an area to be in they go back to the tray.
  */
 async function deleteArea(theme) {
+  // Themes are shared between coders; independent mode hides other coders'
+  // quotes, and deleting the area would take them out of it unseen.
+  if (currentMode() === "independent" && theme.refs.some((ref) => !ctx.state.byRef.has(ref))) {
+    ctx.notify("This area holds quotes from other coders that independent mode hides. Switch to Collaborative to delete it.", { kind: "warn" });
+    return;
+  }
   const snapshot = {
     title: theme.title,
     note: theme.note || "",
@@ -1337,16 +1352,20 @@ async function deleteArea(theme) {
   ctx.refreshBoard();
 
   const count = snapshot.cards.length;
+  // Undo recreates a theme as one of your own, so a common theme gets none;
+  // putting it back as common would mean promoting it again.
   ctx.notify(
     count
-      ? `Deleted “${snapshot.title}”. Its ${count} quote${count === 1 ? "" : "s"} are back in the tray.`
+      ? `Deleted “${snapshot.title}”. Its ${count} code${count === 1 ? "" : "s"} are back in the tray.`
       : `Deleted “${snapshot.title}”.`,
-    {
-      action: {
-        label: "Undo",
-        onAct: () => send("/api/library/themes", snapshot, "Could not put that area back"),
-      },
-    }
+    isCommon(theme)
+      ? {}
+      : {
+          action: {
+            label: "Undo",
+            onAct: () => send("/api/library/themes", snapshot, "Could not put that area back"),
+          },
+        }
   );
 }
 

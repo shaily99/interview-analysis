@@ -9,9 +9,10 @@
  */
 
 import { $, api, formatTime, recall, remember } from "./util.js";
-import { initPlayer, nudge, stepRate, togglePlay } from "./player.js";
+import { initPlayer, nudge, seek, stepRate, togglePlay } from "./player.js";
 import { initVideoCodes, reloadVideoCodes, videoCodeKey } from "./video_codes.js";
 import { notify } from "./chrome.js";
+import { ensureCoder, mountCoderControls } from "./coder.js";
 
 const MUTE_KEY = "subtitle-search:codingMuted";
 
@@ -58,6 +59,8 @@ function setMuted(muted) {
 }
 
 async function load() {
+  // Every span is someone's, so nothing loads until we know who is coding.
+  await ensureCoder();
   const config = await api("/api/config");
   const asked = new URLSearchParams(location.search).get("recording");
   ctx.recordingId =
@@ -88,6 +91,18 @@ async function load() {
 
   initVideoCodes(ctx);
   window.addEventListener("focus", () => reloadVideoCodes(ctx).catch(() => {}));
+  const redraw = () => ctx.onVideoCodesModeChange?.();
+  window.addEventListener("modechange", redraw);
+  window.addEventListener("coderchange", () => reloadVideoCodes(ctx).then(redraw).catch(() => {}));
+  // A link from the Codebook page carries the moment of the span it points at.
+  const at = Number(new URLSearchParams(location.search).get("t"));
+  if (Number.isFinite(at) && at > 0) seek(ctx, at);
+  mountCoderControls(ctx.el.themeToggle.parentElement, {
+    onRefresh: async () => {
+      await reloadVideoCodes(ctx);
+      ctx.notify("Refreshed from the folder.");
+    },
+  });
 }
 
 const TYPING = new Set(["INPUT", "TEXTAREA", "SELECT"]);

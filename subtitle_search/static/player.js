@@ -1,7 +1,4 @@
-/* The media dock.
- *
- * The dock starts minimized and stays that way between sessions: the point of
- * this tool is reading, and the recording is a reference you drop into.
+/* The media player in the video pane.
  *
  * An interrupted session is several files, but the reader only ever sees one
  * timeline. Everything crossing this module's boundary is in *session* time;
@@ -170,14 +167,17 @@ export function initPlayer(ctx) {
   // an audio-only recording, the control for it goes away rather than sitting
   // there doing nothing.
   const anyVideo = playable.some((part) => part.media_kind === "video");
+  // In the reader the video is a pane of its own, shown and hidden by the pane
+  // layout, so it keeps no minimized state of its own.
+  const fixed = dock.dataset.fixed === "true";
   const states = anyVideo ? ["minimized", "expanded"] : ["minimized"];
-  dockToggle.hidden = !anyVideo;
+  dockToggle.hidden = fixed || !anyVideo;
 
   // Whether you want the video showing is worth remembering between sessions.
   // A stored state from an older build may name one that no longer exists.
   const stored = recall(DOCK_KEY);
   const opening = stored === "expanded" && anyVideo ? "expanded" : "minimized";
-  dock.dataset.state = states.includes(opening) ? opening : "minimized";
+  if (!fixed) dock.dataset.state = states.includes(opening) ? opening : "minimized";
   syncDockLabel();
 
   duration.textContent = formatTime(ctx.data.duration);

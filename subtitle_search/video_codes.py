@@ -1,40 +1,34 @@
 """Video codes: named spans of time in the recording.
 
-Quotes are anchored to words and labelled with tags. Video codes are the other
-half of coding an interview -- what someone *did* rather than what they said:
-``scroll`` from 1:02 to 1:30, ``hesitates`` over a button. They are kept wholly
-separate from tags, on purpose. A tag and a video code can share a name without
-having anything to do with each other, and neither vocabulary ever suggests the
-other's entries.
+Video codes mark what someone *did* (``scroll`` from 1:02 to 1:30); text codes
+mark what was said. The two codebooks are separate and never merged.
 
-Two files hold them.
-
-The codebook, ``library.video_codebook.json`` at the library root, is the list of
-codes, shared by every recording so a study codes consistently. Each code has an
-id, and spans refer to that id rather than the name, so a rename or a recolor is
-one edit that every span follows.
-
-The spans, ``session.video_codes.json`` in each recording folder, are the coded
-stretches of that session. Times are session seconds -- the same continuous
-timeline as cues and quotes -- so a span can cross the seam of an interrupted
-recording. Spans do not depend on the transcript at all, so correcting a caption
-can never move one.
+- ``VideoCodebook``: one coder's codes, ``<study>/coders/<id>/video_codebook.json``.
+  Spans refer to a code by id, so a rename follows everywhere.
+- ``VideoCodeStore``: one coder's spans in one recording,
+  ``<recording>/coders/<id>/video_codes.json``, in session seconds, so a span can
+  cross an interruption and never moves when a caption is corrected.
+- ``SessionVideoCodes``: every coder's spans plus common spans for a recording;
+  it writes only to the caller's own store.
 """
 
 from __future__ import annotations
 
 import uuid
 
+from .codebook import COLORS, Codebook, CodebookError
 from .jsonstore import JsonStore, now
 
 SCHEMA_VERSION = 1
 
-CODEBOOK_FILENAME = "library.video_codebook.json"
-SPANS_FILENAME = "session.video_codes.json"
+#: Per coder: the codebook at ``<study>/coders/<id>/``, the spans at
+#: ``<recording>/coders/<id>/``.
+CODEBOOK_FILENAME = "video_codebook.json"
+SPANS_FILENAME = "video_codes.json"
 
-#: Named here and drawn by the frontend, like quote colors, but a separate set:
-#: a video code should never be mistaken for a highlight.
-COLORS = ("blue", "orange", "green", "magenta", "slate", "gold", "cyan", "brick")
+#: The shared files from before coders existed. Read by nothing; only reported.
+LEGACY_CODEBOOK_FILENAME = "library.video_codebook.json"
+LEGACY_SPANS_FILENAME = "session.video_codes.json"
 
 #: Keys the reader and the coding view already use. A code hotkey that shadowed one would silently
 #: stop that key working. Speaker keys are checked in the browser, since the
@@ -42,98 +36,14 @@ COLORS = ("blue", "orange", "green", "magenta", "slate", "gold", "cyan", "brick"
 RESERVED_KEYS = frozenset("jkhcefs/[]iox,.m 0123456789")
 
 
-class VideoCodeError(ValueError):
-    """A request that cannot be applied, reported back as a 400."""
+#: Raised for both codebook and span errors; one error type keeps the routes simple.
+VideoCodeError = CodebookError
 
 
-def _clean_key(raw) -> str | None:
-    key = str(raw or "").strip()
-    if not key:
-        return None
-    if len(key) != 1:
-        raise VideoCodeError("a code's key must be a single character")
-    if key.lower() in RESERVED_KEYS:
-        raise VideoCodeError(f"'{key}' is already used by the reader")
-    return key
+class VideoCodebook(Codebook):
+    """One coder's video codes. Unlike text codes they can carry a shortcut key."""
 
-
-class VideoCodebook(JsonStore):
-    """The library's list of video codes."""
-
-    def _empty(self) -> dict:
-        return {"version": SCHEMA_VERSION, "updated_at": now(), "codes": []}
-
-    def _repair(self, data: dict) -> dict:
-        data.setdefault("version", SCHEMA_VERSION)
-        if not isinstance(data.get("codes"), list):
-            data["codes"] = []
-        return data
-
-    def list(self) -> list[dict]:
-        return sorted(self._data["codes"], key=lambda c: str(c.get("name", "")).lower())
-
-    def get(self, code_id: str) -> dict | None:
-        return next((c for c in self._data["codes"] if c.get("id") == code_id), None)
-
-    def _check_name(self, name: str, exclude: str | None = None) -> str:
-        name = " ".join(str(name or "").split())
-        if not name:
-            raise VideoCodeError("a code needs a name")
-        for code in self._data["codes"]:
-            if code.get("id") != exclude and str(code.get("name", "")).lower() == name.lower():
-                raise VideoCodeError(f"there is already a code called '{code['name']}'")
-        return name
-
-    def _check_key(self, raw, exclude: str | None = None) -> str | None:
-        key = _clean_key(raw)
-        if key:
-            for code in self._data["codes"]:
-                if code.get("id") != exclude and code.get("key") == key:
-                    raise VideoCodeError(f"'{key}' is already the key for '{code['name']}'")
-        return key
-
-    def _next_color(self) -> str:
-        used = [c.get("color") for c in self._data["codes"]]
-        return min(COLORS, key=lambda color: (used.count(color), COLORS.index(color)))
-
-    def add(self, payload: dict) -> dict:
-        color = payload.get("color")
-        code = {
-            "id": uuid.uuid4().hex[:12],
-            "name": self._check_name(payload.get("name")),
-            "color": color if color in COLORS else self._next_color(),
-            "description": str(payload.get("description") or ""),
-            "key": self._check_key(payload.get("key")),
-            "created_at": now(),
-        }
-        self._data["codes"].append(code)
-        self._write()
-        return code
-
-    def update(self, code_id: str, patch: dict) -> dict:
-        code = self.get(code_id)
-        if code is None:
-            raise KeyError(code_id)
-        if "name" in patch:
-            code["name"] = self._check_name(patch["name"], exclude=code_id)
-        if "color" in patch:
-            if patch["color"] not in COLORS:
-                raise VideoCodeError("unknown color")
-            code["color"] = patch["color"]
-        if "description" in patch:
-            code["description"] = str(patch["description"] or "")
-        if "key" in patch:
-            code["key"] = self._check_key(patch["key"], exclude=code_id)
-        self._write()
-        return code
-
-    def remove(self, code_id: str) -> bool:
-        code = self.get(code_id)
-        if code is None:
-            return False
-        self._data["codes"].remove(code)
-        self._write()
-        return True
+    reserved_keys = RESERVED_KEYS
 
 
 class VideoCodeStore(JsonStore):
@@ -230,6 +140,60 @@ class VideoCodeStore(JsonStore):
         if moved:
             self._write()
         return moved
+
+
+class SessionVideoCodes:
+    """Every coder's spans in one recording, one store per coder.
+
+    Like the quotes: reads are everyone's, labelled with the coder; writes go to
+    the coder's own store and never touch anyone else's spans.
+    """
+
+    def __init__(self, stores: dict[str, VideoCodeStore], factory=None, common=None):
+        self.stores = dict(stores)
+        self.factory = factory
+        #: The agreed spans of this recording (a common.CommonSet), shown to everyone.
+        self.common = common
+
+    @staticmethod
+    def _label(coder: str, span: dict) -> dict:
+        return {**span, "coder": coder}
+
+    def list(self) -> list[dict]:
+        spans = [self._label(c, s) for c, store in self.stores.items() for s in store.list()]
+        if self.common is not None:
+            spans += self.common.list()
+        return sorted(spans, key=lambda s: (s.get("start", 0.0), s.get("end", 0.0)))
+
+    def count(self, code_id: str) -> int:
+        return sum(store.count(code_id) for store in self.stores.values())
+
+    def reassign(self, from_id: str, to_id: str) -> int:
+        return sum(store.reassign(from_id, to_id) for store in self.stores.values())
+
+    def _own(self, coder: str, span_id: str) -> VideoCodeStore:
+        owner = next((c for c, s in self.stores.items() if s._find(span_id)), None)
+        if owner is None:
+            raise KeyError(span_id)
+        if owner != coder:
+            raise PermissionError("that span belongs to another coder")
+        return self.stores[owner]
+
+    def store_for(self, coder: str) -> VideoCodeStore:
+        if coder not in self.stores:
+            if self.factory is None:
+                raise KeyError(coder)
+            self.stores[coder] = self.factory(coder)
+        return self.stores[coder]
+
+    def add(self, coder: str, payload: dict, codebook: VideoCodebook, duration: float | None) -> dict:
+        return self._label(coder, self.store_for(coder).add(payload, codebook, duration))
+
+    def update(self, coder: str, span_id: str, patch: dict, codebook: VideoCodebook, duration: float | None) -> dict:
+        return self._label(coder, self._own(coder, span_id).update(span_id, patch, codebook, duration))
+
+    def remove(self, coder: str, span_id: str) -> bool:
+        return self._own(coder, span_id).remove(span_id)
 
 
 # -- across the library -------------------------------------------------------

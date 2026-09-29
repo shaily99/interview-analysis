@@ -1,6 +1,7 @@
 /* Thematic analysis across every recording in the library.
  *
- * Views over the same quotes, because the work has more than one shape:
+ * Themes hold codes (text and video); their quotes and spans are the evidence.
+ * Views, because the work has more than one shape:
  *
  *   Canvas - the themes on a plane. Generative, and the one with no right-hand
  *            edge: columns stop working at the width of the screen, and a plane
@@ -8,14 +9,17 @@
  *            Where two areas sit relative to each other is itself a claim.
  *   Board  - the same themes as columns. Still the fastest way to sort a pile
  *            when there are few enough themes to see all of them at once.
- *   Matrix - tags against recordings. Analytical: separates a theme many people
- *            raised from one person's preoccupation, which a flat tag list hides.
- *   Pairs  - tags that share quotes. Diagnostic: finds two codes that are really
+ *   Matrix - text codes against recordings. Separates a theme many people
+ *            raised from one person's preoccupation.
+ *   Pairs  - text codes that share quotes. Diagnostic: finds two codes that are really
  *            one code, and codes that always arrive together.
  *
  * Canvas and board are two shapes of one thing, not two groupings: a theme made
  * on either shows up on the other, because membership lives in a single file and
- * a card on the canvas *is* a quote's membership of the area holding it.
+ * a card on the canvas *is* a code's membership of the area holding it.
+ *
+ * Your themes and common themes are shown in every mode; collaborative mode adds
+ * other coders' themes, read-only.
  *
  * What none of them would have on their own is the recording: every quote here
  * can be played where it was said, and a whole theme can be listened to in
@@ -23,12 +27,15 @@
  * written down.
  */
 
-import { $, api, escapeHtml, formatTime } from "./util.js";
+import { $, api, CODER_KEY, escapeHtml, formatTime, recall } from "./util.js";
 import { applyRate, storedRate } from "./player.js";
 import { applyStoredTheme, bindThemeToggle, notify } from "./chrome.js";
+import { coderTag, currentMode, ensureCoder, isCommon, isMine, mountCoderControls } from "./coder.js";
+import { openMoveDialog } from "./commondialog.js";
 import { initCanvas, renderCanvas, showCanvas } from "./canvas.js";
 import {
   initSemantics,
+  clearSelection,
   invalidateSemantics,
   renderGraph,
   renderMap,
@@ -70,6 +77,7 @@ const state = {
   byRef: new Map(),
   recordings: new Map(),
   tags: [],
+  codes: [],
   cooccurrence: [],
   themes: [],
   cards: [],
@@ -87,14 +95,19 @@ const state = {
 /* ------------------------------------------------------------- loading -- */
 
 async function load() {
-  const [library, quotes, themes] = await Promise.all([
-    api("/api/library"),
-    api("/api/library/quotes"),
-    api("/api/library/themes"),
+  const [library, quotes, codes, themes] = await Promise.all([
+    api(`/api/library?mode=${currentMode()}`),
+    api(`/api/library/quotes?mode=${currentMode()}`),
+    api(`/api/library/codes?mode=${currentMode()}`),
+    api(`/api/library/themes?mode=${currentMode()}`),
   ]);
 
+  // Themes hold codes, so the canvas and board lay out codes; the matrix, pairs,
+  // map, graph and signals still read the quotes. One lookup serves both, since
+  // code refs ("text:…", "video:…") and quote refs never collide.
   state.quotes = quotes.quotes;
-  state.byRef = new Map(state.quotes.map((q) => [q.ref, q]));
+  state.codes = codes.codes;
+  state.byRef = new Map([...state.quotes, ...state.codes].map((item) => [item.ref, item]));
   state.recordings = new Map(library.recordings.map((r) => [r.id, r]));
   state.tags = library.tags;
   state.cooccurrence = library.cooccurrence;
@@ -104,12 +117,18 @@ async function load() {
   el.meta.textContent = [
     `${library.recordings.length} recordings`,
     `${state.quotes.length} quotes`,
-    `${library.tags.length} tags`,
-    library.untagged_count ? `${library.untagged_count} untagged` : null,
+    `${state.codes.length} codes`,
+    `${library.tags.length} text codes`,
+    library.untagged_count ? `${library.untagged_count} uncoded` : null,
   ].filter(Boolean).join("  ·  ");
 
-  const wanted = new URLSearchParams(location.search).get("tag");
+  // A link from the library opens one code in the matrix, once: a later reload
+  // for a mode switch or Refresh must not pull you back to it.
+  const url = new URL(location.href);
+  const wanted = url.searchParams.get("tag");
   if (wanted) {
+    url.searchParams.delete("tag");
+    history.replaceState(null, "", url);
     showMode("matrix");
     renderMatrix(wanted);
   } else {
@@ -147,6 +166,131 @@ function adopt(payload) {
 function recount() {
   state.placed = new Set(state.themes.flatMap((theme) => theme.refs));
   state.onCanvas = new Set(state.cards.map((card) => card.ref));
+}
+
+/** Whether a theme holds quotes the current mode does not show. Themes are still
+ *  shared between coders, so deleting one in independent mode would remove other
+ *  coders' quotes from it unseen. */
+function hidesOthers(theme) {
+  return currentMode() === "independent" && theme.refs.some((ref) => !state.byRef.has(ref));
+}
+
+/* ------------------------------------------------- moving themes to common -- */
+
+/**
+ * Make one of your themes common, after its codes are.
+ *
+ * A common theme holds only agreed codes, so a theme still holding codes of your
+ * own is not moved: the dialog lists them, each with Move to common, and the
+ * theme follows once they are agreed. Otherwise it asks, like moving a code,
+ * that the theme is final, for a description, and whether it becomes a new
+ * common theme or joins one that exists.
+ */
+async function promoteTheme(theme) {
+  const check = await postTheme(theme.id, { final: false });
+  document.getElementById("theme-dialog")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "theme-dialog";
+  overlay.className = "login";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+
+  if (check.status === 409) {
+    overlay.innerHTML = `
+      <div class="login__card move">
+        <h2 class="login__title">Move “${escapeHtml(theme.title || "Untitled")}” to common</h2>
+        <p class="login__lead">A common theme holds only common codes. Move these to common first; the theme can follow once they are.</p>
+        <ul class="move__blocking">${check.body.blocking
+          .map((b) => `<li><span>${escapeHtml(b.name)}</span> <button class="btn" type="button" data-block="${escapeHtml(b.ref)}">Move to common…</button></li>`)
+          .join("")}</ul>
+        <div class="login__actions"><button class="btn" type="button" data-cancel>Close</button></div>
+      </div>`;
+    overlay.querySelector("[data-cancel]").addEventListener("click", close);
+    overlay.addEventListener("click", async (event) => {
+      const ref = event.target.closest("[data-block]")?.dataset.block;
+      if (!ref) return;
+      const item = state.byRef.get(ref);
+      if (!item) return;
+      const common = state.codes.filter((c) => isCommon(c) && c.kind === item.kind).map((c) => ({ ...c, name: c.name }));
+      const done = await openMoveDialog({ kind: item.kind, code: item, common });
+      if (done) {
+        close();
+        await load();
+        const again = state.themes.find((t) => t.id === theme.id);
+        if (again) promoteTheme(again);
+      }
+    });
+    return;
+  }
+
+  const commonThemes = state.themes.filter(isCommon);
+  overlay.innerHTML = `
+    <form class="login__card move" novalidate>
+      <h2 class="login__title">Move “${escapeHtml(theme.title || "Untitled")}” to common</h2>
+      <fieldset class="move__as"><legend>Move it as</legend>
+        <label><input type="radio" name="as" value="new" checked> A new common theme</label>
+        <label><input type="radio" name="as" value="merge" ${commonThemes.length ? "" : "disabled"}> Merged into
+          <select id="theme-into" ${commonThemes.length ? "" : "disabled"}>${commonThemes
+            .map((t) => `<option value="${t.id}">✓ ${escapeHtml(t.title || "Untitled")}</option>`)
+            .join("")}</select></label>
+      </fieldset>
+      <label class="move__check"><input type="checkbox" id="theme-final"> This theme has been discussed and is final.</label>
+      <label class="move__desc">Description<textarea id="theme-description" rows="3">${escapeHtml(theme.note || "")}</textarea>
+        <span class="login__hint">${theme.note ? "Check your description still holds before moving." : "Say what this theme is, for everyone reading it."}</span></label>
+      <p class="login__error" id="theme-error" role="alert" hidden></p>
+      <div class="login__actions"><button class="btn" type="button" data-cancel>Cancel</button>
+        <button class="btn btn--primary" type="submit" disabled>Move to common</button></div>
+    </form>`;
+  const form = overlay.querySelector("form");
+  form.addEventListener("keydown", (event) => event.stopPropagation());
+  overlay.querySelector("[data-cancel]").addEventListener("click", close);
+  overlay.querySelector("#theme-final").addEventListener("change", (event) => {
+    form.querySelector('[type="submit"]').disabled = !event.target.checked;
+  });
+  // Merging shows the common theme's description, since that is the one kept;
+  // it is sent only if edited, so an untouched one is left as it is.
+  const description = overlay.querySelector("#theme-description");
+  let edited = false;
+  description.addEventListener("input", () => (edited = true));
+  const showDescription = () => {
+    if (edited) return;
+    const merge = form.elements.as.value === "merge";
+    const target = commonThemes.find((t) => t.id === overlay.querySelector("#theme-into").value);
+    description.value = merge ? target?.note || "" : theme.note || "";
+  };
+  form.querySelectorAll('[name="as"]').forEach((radio) => radio.addEventListener("change", showDescription));
+  overlay.querySelector("#theme-into").addEventListener("change", showDescription);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const merge = form.elements.as.value === "merge";
+    const reply = await postTheme(theme.id, {
+      final: true,
+      ...(edited ? { description: description.value } : {}),
+      ...(merge ? { into: overlay.querySelector("#theme-into").value } : {}),
+    });
+    if (reply.status !== 200) {
+      const error = overlay.querySelector("#theme-error");
+      error.textContent = reply.body.detail || "Could not move that theme.";
+      error.hidden = false;
+      return;
+    }
+    close();
+    adopt(reply.body);
+    window.dispatchEvent(new CustomEvent("commonchange"));
+    notify(el.notices, `Moved “${theme.title || "Untitled"}” to common.`);
+  });
+}
+
+/** The theme move itself; a theme still holding independent codes comes back as a 409. */
+async function postTheme(themeId, body) {
+  const response = await fetch(`/api/library/themes/${themeId}/move`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Coder": recall(CODER_KEY) || "", "X-Mode": currentMode() },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json().catch(() => ({})) };
 }
 
 /* --------------------------------------------------------------- modes -- */
@@ -264,12 +408,40 @@ async function moveCard(ref, from, to) {
 
 function boardQuotes() {
   const filter = el.boardFilter.value;
-  return state.quotes.filter((quote) => {
-    if (filter === "unplaced") return !state.placed.has(quote.ref);
-    if (filter === "tagged") return (quote.tags || []).length > 0;
-    if (filter === "untagged") return (quote.tags || []).length === 0;
+  return state.codes.filter((item) => {
+    if (filter === "unplaced") return !state.placed.has(item.ref);
+    if (filter === "tagged") return item.count > 0;
+    if (filter === "untagged") return item.count === 0;
     return true;
   });
+}
+
+/** A code as a board card: what it is, whose, and how widely it is used. */
+function codeCard(item, { column = null } = {}) {
+  const movable = (theme) => theme.id !== column && (isMine(theme) || isCommon(theme));
+  const mover = `<select class="qcard__move" data-act="move" aria-label="Move this code to a theme">
+       <option value=""${column ? "" : " selected"}>Unsorted</option>
+       ${state.themes
+         .filter((theme) => theme.id === column || movable(theme))
+         .map((theme) => `<option value="${theme.id}"${theme.id === column ? " selected" : ""}>${escapeHtml(theme.title || "Untitled")}</option>`)
+         .join("")}
+     </select>`;
+  const noun = item.kind === "video" ? "span" : "quote";
+  return `
+    <article class="qcard qcard--code vc--${escapeHtml(item.color || "slate")}" data-ref="${item.ref}"
+             data-column="${column || ""}" draggable="true">
+      <p class="qcard__text">${item.kind === "video" ? "▶ " : ""}${escapeHtml(item.name)} ${coderTag(item.coder)}</p>
+      <div class="qcard__meta">
+        <span class="qcard__where">${item.count} ${noun}${item.count === 1 ? "" : "s"} · ${item.recordings.length} rec</span>
+        <span class="qcard__tools">
+          <button class="icon-btn" data-act="play" title="Play every ${noun} with this code">▷</button>
+          <a class="icon-btn" target="_blank" rel="noopener" href="/codebook?kind=${item.kind}&code=${encodeURIComponent(item.id)}"
+             title="Open this code's page, in a new tab">↗</a>
+        </span>
+      </div>
+      ${item.description ? `<p class="qcard__note">${escapeHtml(item.description)}</p>` : ""}
+      ${mover}
+    </article>`;
 }
 
 function renderBoard() {
@@ -287,9 +459,9 @@ function renderBoard() {
   );
   const unsorted = visible.filter((quote) => !state.placed.has(quote.ref));
 
-  el.boardProgress.textContent = state.quotes.length
-    ? `${state.placed.size} of ${state.quotes.length} quotes placed`
-    : "no quotes saved yet";
+  el.boardProgress.textContent = state.codes.length
+    ? `${state.placed.size} of ${state.codes.length} codes placed`
+    : "no codes yet";
 
   const columns = [
     `<section class="column column--unsorted" data-theme-id="">
@@ -298,7 +470,7 @@ function renderBoard() {
          <span class="column__count">${unsorted.length}</span>
        </header>
        <div class="column__body" data-drop="">
-         ${unsorted.map((q) => quoteCard(q)).join("") ||
+         ${unsorted.map((q) => codeCard(q)).join("") ||
            '<p class="empty">Nothing left here.</p>'}
        </div>
      </section>`,
@@ -306,22 +478,26 @@ function renderBoard() {
 
   for (const theme of state.themes) {
     const quotes = inTheme.get(theme.id) || [];
-    const recordings = new Set(quotes.map((q) => q.recording_id));
+    const recordings = new Set(quotes.flatMap((q) => q.recordings || []));
+    // Other coders' themes are shown in collaborative mode, and are read-only.
+    const readOnly = !isMine(theme) && !isCommon(theme);
     columns.push(`
-      <section class="column" data-theme-id="${theme.id}">
+      <section class="column${isCommon(theme) ? " column--common" : ""}" data-theme-id="${theme.id}">
         <header class="column__head">
           <input class="column__title-input" value="${escapeHtml(theme.title)}"
-                 data-act="rename" aria-label="Theme name">
+                 data-act="rename" aria-label="Theme name" ${readOnly ? "readonly" : ""}>
+          ${isMine(theme) ? "" : coderTag(theme.coder)}
           <span class="column__count">${quotes.length}</span>
-          <button class="icon-btn" data-act="play-theme" title="Play every quote in this theme">▶</button>
-          <button class="icon-btn" data-act="delete-theme" title="Delete theme">✕</button>
+          <button class="icon-btn" data-act="play-theme" title="Play every quote and span in this theme">▷</button>
+          ${isMine(theme) ? '<button class="icon-btn" data-act="promote-theme" title="Move this theme to common…">✓</button>' : ""}
+          ${readOnly ? "" : '<button class="icon-btn" data-act="delete-theme" title="Delete theme">✕</button>'}
         </header>
         <p class="column__spread">${recordings.size} of ${state.recordings.size} recordings</p>
         <textarea class="column__note" rows="1" placeholder="What is this theme?"
-                  data-act="note">${escapeHtml(theme.note || "")}</textarea>
-        <div class="column__body" data-drop="${theme.id}">
-          ${quotes.map((q) => quoteCard(q, { column: theme.id })).join("") ||
-            '<p class="empty">Drag quotes here.</p>'}
+                  data-act="note" ${readOnly ? "readonly" : ""}>${escapeHtml(theme.note || "")}</textarea>
+        <div class="column__body" data-drop="${readOnly ? "none" : theme.id}">
+          ${quotes.map((q) => codeCard(q, { column: theme.id })).join("") ||
+            '<p class="empty">Drag codes here.</p>'}
         </div>
       </section>`);
   }
@@ -386,6 +562,7 @@ el.boardColumns.addEventListener("drop", async (event) => {
 
   const card = dragging || { ref: event.dataTransfer.getData("text/plain"), from: null };
   if (!card.ref) return;
+  if (body.dataset.drop === "none") return; // another coder's theme is read-only
   const to = body.dataset.drop || null;
   if (to !== card.from) await moveCard(card.ref, card.from, to);
 });
@@ -406,8 +583,10 @@ el.boardColumns.addEventListener("click", async (event) => {
   const card = event.target.closest(".qcard");
 
   if (action === "play" && card) {
-    const quote = state.byRef.get(card.dataset.ref);
-    if (quote) startQueue([quote], quote.text.slice(0, 40));
+    const item = state.byRef.get(card.dataset.ref);
+    if (item?.applications?.length) startQueue(item.applications, item.name);
+    else if (item?.text && item.start_time != null) startQueue([item], item.text.slice(0, 40));
+    else notify(el.notices, "Nothing carries that code yet.");
     return;
   }
   if (!column || !column.dataset.themeId) return;
@@ -415,10 +594,16 @@ el.boardColumns.addEventListener("click", async (event) => {
   if (!theme) return;
 
   if (action === "play-theme") {
-    const quotes = theme.refs.map((ref) => state.byRef.get(ref)).filter(Boolean);
+    const quotes = theme.refs.flatMap((ref) => state.byRef.get(ref)?.applications || []);
     if (quotes.length) startQueue(quotes, theme.title);
-    else notify(el.notices, "That theme has no quotes in it yet.");
+    else notify(el.notices, "Nothing in that theme has a quote or span yet.");
+  } else if (action === "promote-theme") {
+    await promoteTheme(theme);
   } else if (action === "delete-theme") {
+    if (hidesOthers(theme)) {
+      notify(el.notices, "This theme holds quotes from other coders that independent mode hides. Switch to Collaborative to delete it.", { kind: "warn" });
+      return;
+    }
     try {
       await api(`/api/library/themes/${theme.id}`, { method: "DELETE" });
       state.themes = state.themes.filter((t) => t.id !== theme.id);
@@ -459,14 +644,14 @@ function renderMatrix(focusTag = null) {
     el.matrix.innerHTML = "";
     el.matrixNote.textContent = "";
     el.matrixDetail.innerHTML =
-      '<p class="empty">No tags yet. Tag some quotes in the reader and they will show up here.</p>';
+      '<p class="empty">No text codes yet. Code some quotes in the reader and they will show up here.</p>';
     return;
   }
 
   el.matrixNote.textContent =
-    "sorted by how many recordings share the tag — the top rows are the findings";
+    "sorted by how many recordings share the text code — the top rows are the findings";
 
-  const head = `<thead><tr><th class="matrix__corner">tag</th>${recordings
+  const head = `<thead><tr><th class="matrix__corner">text code</th>${recordings
     .map((r) => `<th class="matrix__rec"><span>${escapeHtml(r.title)}</span></th>`)
     .join("")}<th class="matrix__total">total</th></tr></thead>`;
 
@@ -534,7 +719,7 @@ el.matrixDetail.addEventListener("click", (event) => {
 function renderPairs() {
   if (!state.cooccurrence.length) {
     el.pairs.innerHTML =
-      '<p class="empty">No two tags share a quote yet. This view fills in once quotes carry more than one tag.</p>';
+      '<p class="empty">No two text codes share a quote yet. This view fills in once quotes carry more than one text code.</p>';
     el.pairsNote.textContent = "";
     return;
   }
@@ -675,6 +860,7 @@ const shared = {
   refreshBoard: renderBoard,
   adopt,
   recount,
+  promoteTheme,
 };
 
 initCanvas(shared);
@@ -682,6 +868,24 @@ initSemantics({ ...shared, quoteCard });
 
 applyStoredTheme();
 bindThemeToggle($("theme-toggle"));
-load().catch((error) =>
-  notify(el.notices, `Could not load the library: ${error.message}`, { kind: "warn" })
-);
+const loadThemes = () =>
+  load().catch((error) => notify(el.notices, `Could not load the library: ${error.message}`, { kind: "warn" }));
+// Quotes and codes follow the mode switch; themes themselves stay shared until
+// they are rebuilt from codes.
+const reloadForMode = async () => {
+  // A lasso made in the other mode may hold quotes this mode hides; making a
+  // theme from it would move them without anyone seeing.
+  clearSelection();
+  invalidateSemantics();
+  await loadThemes();
+  // The analysis views draw only when shown, so the one on screen is redrawn.
+  if (["map", "graph", "signals"].includes(state.mode)) showMode(state.mode);
+};
+ensureCoder()
+  .then(() => {
+    mountCoderControls($("theme-toggle").parentElement, { onRefresh: reloadForMode });
+    window.addEventListener("modechange", reloadForMode);
+    window.addEventListener("coderchange", reloadForMode);
+    loadThemes();
+  })
+  .catch((error) => notify(el.notices, `Could not load the coders: ${error.message}`, { kind: "warn" }));

@@ -19,18 +19,24 @@
   <div class="topbar__search">
     <label class="field">
       <span class="field__key">/</span>
-      <input type="search" id="search-input" placeholder="Find a quote" autocomplete="off" spellcheck="false">
+      <input type="search" id="search-input" placeholder="Search the transcript" autocomplete="off" spellcheck="false"
+             aria-controls="search-drop" aria-expanded="false">
     </label>
     <button class="toggle" id="regex-toggle" type="button" aria-pressed="false" title="Match with a regular expression">.*</button>
+    <!-- Matches drop down under the box and close when one is picked. -->
+    <section class="search-drop" id="search-drop" hidden aria-label="Search results">
+      <header class="panel__head">
+        <h2 class="panel__title">Results</h2>
+        <span class="panel__count" id="search-count"></span>
+      </header>
+      <div class="search-drop__body" id="search-results"></div>
+    </section>
   </div>
 
   <div class="topbar__actions">
     <a class="btn" id="library-link" href="/" hidden>← Library</a>
-    <button class="btn" id="tab-search" type="button" aria-pressed="false">Results</button>
-    <button class="btn" id="tab-highlights" type="button" aria-pressed="true">Quotes <span class="count" id="highlight-count">0</span></button>
     <a class="btn" id="coding-link" href="/code" title="Code the video without the transcript">▶ Code video</a>
-    <button class="btn" id="vc-side-toggle" type="button" aria-pressed="true" title="Show video codes beside the transcript">Codes beside text</button>
-    <button class="btn" id="tab-video-codes" type="button" aria-pressed="false" title="Spans of the video, coded with i and o">▶ Video codes <span class="count" id="video-code-count">0</span></button>
+    <a class="btn" href="/codebook" title="Every text and video code, and where each is used">Codebook</a>
     <button class="btn btn--icon" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme">◐</button>
   </div>
 </header>
@@ -39,79 +45,80 @@
 <div class="roster" id="roster" hidden></div>
 <div class="timing" id="timing" hidden></div>
 
-<div class="workspace">
-  <main class="reader" id="reader" tabindex="-1">
-    <div class="transcript" id="transcript">
-      <div class="spine-marker" id="spine-marker" hidden>
-        <span class="spine-marker__dot" id="spine-dot" hidden></span>
-      </div>
-      <div class="chunks" id="chunks"></div>
-    </div>
-  </main>
-
-  <aside class="sidebar" id="sidebar">
-    <section class="panel" id="panel-search" hidden>
-      <header class="panel__head">
-        <h2 class="panel__title">Results</h2>
-        <span class="panel__count" id="search-count"></span>
-      </header>
-      <div class="panel__body" id="search-results">
-        <p class="empty">Search the transcript to find a quote. Exact matches come first, then close ones.</p>
+<!-- Three panes, each resizable and collapsible: the video with its code rows,
+     the transcript, and the text codes beside the text they belong to. -->
+<div class="panes" id="panes">
+  <div class="pane-stack" data-stack="watch" data-label="Video" style="flex-grow:40">
+    <section class="pane" data-pane="video" data-label="Video" style="flex-grow:55">
+      <header class="pane__head">Video<span class="pane__sp"></span>
+        <button class="pane__x" type="button" data-collapse aria-label="Collapse the video">–</button></header>
+      <div class="dock" id="dock" data-state="expanded" data-fixed="true">
+        <div class="dock__stage" id="dock-stage">
+          <video id="media" playsinline preload="metadata"></video>
+        </div>
+        <div class="dock__bar">
+          <button class="transport" id="play" type="button" aria-label="Play">▶</button>
+          <span class="clock" id="clock">0:00</span>
+          <input class="scrub" id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+          <span class="clock clock--muted" id="duration">0:00</span>
+          <label class="rate">
+            <span class="rate__label">speed</span>
+            <select class="rate__select" id="rate" aria-label="Playback speed">
+              <option value="0.5">0.5&times;</option>
+              <option value="0.75">0.75&times;</option>
+              <option value="1" selected>1&times;</option>
+              <option value="1.25">1.25&times;</option>
+              <option value="1.5">1.5&times;</option>
+              <option value="1.75">1.75&times;</option>
+              <option value="2">2&times;</option>
+            </select>
+          </label>
+          <button class="follow" id="follow" type="button" hidden>Follow along</button>
+          <button class="btn btn--icon" id="dock-toggle" type="button" hidden>▣</button>
+        </div>
       </div>
     </section>
-
-    <section class="panel" id="panel-highlights">
-      <header class="panel__head">
-        <h2 class="panel__title">Quotes</h2>
-        <span class="panel__count" id="highlights-path"></span>
-      </header>
-      <div class="panel__filters" id="tag-filters"></div>
-      <div class="panel__body" id="highlight-list">
-        <p class="empty">Select text in the transcript to save a quote. Quotes are written to a JSON file next to the recording.</p>
+    <div class="pane-div pane-div--h"></div>
+    <section class="pane" data-pane="vcodes" data-label="Video codes" style="flex-grow:45" id="panel-video-codes">
+      <header class="pane__head">Video codes <span class="count" id="video-code-count">0</span>
+        <span class="pane__tabs" role="tablist">
+          <button type="button" role="tab" data-vc-tab="rows" aria-selected="true">Rows</button>
+          <button type="button" role="tab" data-vc-tab="list" aria-selected="false">List</button>
+        </span>
+        <span class="pane__sp"></span>
+        <span class="pane__zoom" id="vc-zoom"></span>
+        <button class="pane__x" type="button" data-collapse aria-label="Collapse the video codes">–</button></header>
+      <div class="pane__body vc-tiers" id="vc-tiers" data-vc-view="rows"></div>
+      <div class="pane__body" data-vc-view="list" hidden>
+        <div class="vc-manage" id="vc-manage"></div>
+        <div class="panel__filters" id="vc-filters"></div>
+        <div id="vc-list"></div>
       </div>
     </section>
-
-    <section class="panel" id="panel-video-codes" hidden>
-      <header class="panel__head">
-        <h2 class="panel__title">Video codes</h2>
-        <span class="panel__count">i · o · x</span>
-      </header>
-      <div class="vc-manage" id="vc-manage"></div>
-      <div class="panel__filters" id="vc-filters"></div>
-      <div class="panel__body" id="vc-list"></div>
-    </section>
-  </aside>
-</div>
-
-<div class="dock" id="dock" data-state="minimized">
-  <div class="dock__grip" id="dock-grip" role="separator" aria-orientation="horizontal"
-       tabindex="0" aria-label="Resize video — drag, or use the arrow keys"></div>
-  <div class="dock__stage" id="dock-stage">
-    <video id="media" playsinline preload="metadata"></video>
   </div>
-  <div class="dock__bar">
-    <button class="transport" id="play" type="button" aria-label="Play">▶</button>
-    <span class="clock" id="clock">0:00</span>
-    <div class="scrub-wrap">
-      <div class="vc-lane" id="vc-lane" aria-label="Video codes"></div>
-      <input class="scrub" id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+  <div class="pane-div"></div>
+  <section class="pane" data-pane="transcript" data-label="Transcript" style="flex-grow:34">
+    <header class="pane__head">Transcript<span class="pane__sp"></span>
+      <button class="pane__x" type="button" data-collapse aria-label="Collapse the transcript">–</button></header>
+    <main class="reader" id="reader" tabindex="-1">
+      <div class="transcript" id="transcript">
+        <div class="spine-marker" id="spine-marker" hidden>
+          <span class="spine-marker__dot" id="spine-dot" hidden></span>
+        </div>
+        <div class="chunks" id="chunks"></div>
+      </div>
+    </main>
+  </section>
+  <div class="pane-div"></div>
+  <section class="pane" data-pane="codes" data-label="Text codes" style="flex-grow:26" id="panel-highlights">
+    <header class="pane__head">Text codes <span class="count" id="highlight-count">0</span>
+      <span class="pane__note" id="highlights-path"></span><span class="pane__sp"></span>
+      <button class="pane__x" type="button" data-collapse aria-label="Collapse the text codes">–</button></header>
+    <div class="panel__filters" id="tag-filters"></div>
+    <div class="pane__body quotes-level" id="highlight-list">
+      <p class="empty">Select text in the transcript to save a quote.</p>
     </div>
-    <span class="clock clock--muted" id="duration">0:00</span>
-    <label class="rate">
-      <span class="rate__label">speed</span>
-      <select class="rate__select" id="rate" aria-label="Playback speed">
-        <option value="0.5">0.5&times;</option>
-        <option value="0.75">0.75&times;</option>
-        <option value="1" selected>1&times;</option>
-        <option value="1.25">1.25&times;</option>
-        <option value="1.5">1.5&times;</option>
-        <option value="1.75">1.75&times;</option>
-        <option value="2">2&times;</option>
-      </select>
-    </label>
-    <button class="follow" id="follow" type="button" hidden>Follow along</button>
-    <button class="btn btn--icon" id="dock-toggle" type="button" title="Expand video">▣</button>
-  </div>
+  </section>
 </div>
 
 <div class="vc-picker" id="vc-picker" hidden></div>

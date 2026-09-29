@@ -1,16 +1,8 @@
-/* A tag field that completes against the whole study.
+/* A token field for the text codes on a quote.
  *
- * The old field was one text box of comma-separated tags with a <datalist>
- * hung off it, which cannot work: a datalist matches the entire value, so once
- * you have typed "trust, pri" it has nothing to offer. Tags are tokens, so the
- * field holds tokens.
- *
- * The suggestions come from every recording in the library, not just this one.
- * That is the whole point of it: the moment to stop someone inventing
- * "privacy-concerns" alongside an existing "privacy" is while they are typing
- * the second one, and the only way to know is to look outside the file being
- * edited. Each suggestion carries how widely it is already used, so the
- * established tag is the obvious pick.
+ * Suggestions come from the text codebook (yours and common names), ranked
+ * prefix first, then by how widely each is used, so the established code is the
+ * obvious pick. A common name picked here creates your own code of that name.
  */
 
 import { escapeHtml } from "./util.js";
@@ -48,14 +40,17 @@ function rank(vocabulary, query, chosen) {
  * @param getTags      (id) -> the tags currently on that quote
  * @param getVocabulary() -> [{tag, quote_count, recording_count}]
  * @param onCommit     (id, tags) -> persist
+ * @param decorate     (tag) -> {before, after} html around a chip's name, e.g. a
+ *                     colour swatch and the coder's initials
+ * @param noun         what a token is called in the field's labels
  */
-export function mountTagFields(root, { getTags, getVocabulary, onCommit }) {
+export function mountTagFields(root, { getTags, getVocabulary, onCommit, decorate, noun = "tag" }) {
   for (const host of root.querySelectorAll(".tagfield:not([data-ready])")) {
-    mount(host, { getTags, getVocabulary, onCommit });
+    mount(host, { getTags, getVocabulary, onCommit, decorate, noun });
   }
 }
 
-function mount(host, { getTags, getVocabulary, onCommit }) {
+function mount(host, { getTags, getVocabulary, onCommit, decorate, noun }) {
   const id = host.dataset.id;
   host.dataset.ready = "1";
   let tags = [...(getTags(id) || [])];
@@ -66,7 +61,7 @@ function mount(host, { getTags, getVocabulary, onCommit }) {
     <div class="tagfield__chips"></div>
     <input class="tagfield__input" type="text" role="combobox" autocomplete="off"
            aria-expanded="false" aria-controls="${listId}" aria-autocomplete="list"
-           placeholder="Add a tag">
+           placeholder="Add a ${noun}">
     <ul class="tagfield__list" id="${listId}" role="listbox" hidden></ul>`;
 
   const chips = host.querySelector(".tagfield__chips");
@@ -76,9 +71,11 @@ function mount(host, { getTags, getVocabulary, onCommit }) {
   const drawChips = () => {
     chips.innerHTML = tags
       .map(
-        (tag, index) =>
-          `<span class="chip">${escapeHtml(tag)}<button type="button" class="chip__x"
-             data-index="${index}" aria-label="Remove ${escapeHtml(tag)}">✕</button></span>`
+        (tag, index) => {
+          const { before = "", after = "" } = decorate?.(tag) || {};
+          return `<span class="chip">${before}${escapeHtml(tag)}${after}<button type="button" class="chip__x"
+             data-index="${index}" aria-label="Remove ${escapeHtml(tag)}">✕</button></span>`;
+        }
       )
       .join("");
   };
@@ -117,7 +114,7 @@ function mount(host, { getTags, getVocabulary, onCommit }) {
             id="${listId}-${rows.length}" aria-selected="${rows.length === active}"
             data-tag="${escapeHtml(typed)}" data-new="1">
           <span class="tagfield__tag">${escapeHtml(typed)}</span>
-          <span class="tagfield__use">new tag</span>
+          <span class="tagfield__use">new ${noun}</span>
         </li>`);
     }
 

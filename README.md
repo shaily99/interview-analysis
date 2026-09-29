@@ -150,7 +150,7 @@ marker says which part is starting but not how long the gap was.
 ## Your recordings stay put
 
 The rule is about your data, not about your dependencies. **Nothing from a
-recording — audio, transcript, quotes, notes, tags — is ever sent anywhere.** The
+recording — audio, transcript, quotes, notes, codes — is ever sent anywhere.** The
 server binds to `127.0.0.1` only, and the page has no CDN assets, web fonts, or
 analytics, so it is drawn entirely with fonts already on your machine and nothing
 about what you are reading is observable off it.
@@ -177,10 +177,10 @@ still sounds like that person rather than a cartoon — tone is half of why the
 recording is here. The speed is remembered between sessions, survives crossing
 from one recording into the next, and the themes page plays quotes at it too.
 
-The video pane starts minimized and stays that way between sessions. Expanded, it
-can be resized by dragging the grip along its top edge — or by focusing the grip
-and using the arrow keys. The height is remembered, and capped at three quarters
-of the window so the transcript can never be squeezed out.
+The reader has three panes: the video with its video code rows, the transcript,
+and the text codes. Drag a divider (or focus it and use the arrow keys) to
+resize; double-click resets it. – collapses a pane to a labelled strip; click
+the strip to reopen it. Sizes are remembered per browser.
 
 ### Two modes
 
@@ -212,7 +212,7 @@ playback**, and a "Follow along" button appears to re-attach.
 | `1`…`9` | assign this block to a speaker, then move on |
 | `Esc` | clear selection |
 | `i` / `o` | start / end a [video code](#video-codes) at the playhead |
-| `x` | delete the video code under the playhead |
+| `x` | delete your video code under the playhead |
 
 ## Correcting the transcript
 
@@ -448,24 +448,18 @@ A transcript with no roster joins exactly as it always did.
 ## Quotes
 
 Select any text — across caption or speaker boundaries — and a bar appears
-showing the estimated timestamp. Pick a color to save it. The new quote is
-scrolled into view in the Quotes sidebar and briefly marked, and its inline
-highlight is marked too, so the transcript and the list agree on which one you
-just made. Keyboard focus stays in the transcript unless you chose "Save with
-note", so `j` keeps moving you down the page rather than typing into a field.
+showing the estimated timestamp. Pick a color to save it. The quote card appears
+in the Text codes pane, level with its block, and is briefly marked. Keyboard
+focus stays in the transcript unless you chose "Save with note".
 
-Notes and tags are edited in the sidebar. The tag filter lists only tags that
-have quotes behind them, with a count — a tag you have stopped using disappears
-from the filter, while remaining available for autocomplete when tagging.
-
-Everything is written immediately to one `session.highlights.json` beside the
-recording — one file per folder, whatever the number of parts — so quotes travel
-with the folder. There is no save step. Writes are atomic, so an interrupted
-write cannot truncate the file.
-
-Quotes saved by an earlier version, in a file named after the transcript, are
-adopted into the session file on first open. The original is left on disk
-untouched as a backup, never deleted.
+- A quote carries any number of *text codes*: codes from your text codebook,
+  each with a name, colour and description. Type in the card's field to pick one
+  or add a new one.
+- The strip at the top of the pane lists the codebook with counts; click a chip
+  to filter. Each code's ⋯ menu renames, describes, recolours, merges, moves it
+  to common, or deletes it once nothing uses it.
+- Quotes are saved on every change to `<recording>/coders/<you>/quotes.json`.
+  There is no save step.
 
 Timestamps come from where your selection falls inside a caption rather than
 snapping to the caption's start — on Zoom's longer captions that is a difference
@@ -479,67 +473,75 @@ Quotes code what was *said*. Video codes code what *happened* — `scroll` from
 1:02 to 1:30, `hesitates` over a button — as spans of the recording's time rather
 than of its words.
 
-**They are separate from quote tags, entirely.** Their own list, their own files,
-their own place on screen. A video code and a tag can share a name without having
-anything to do with each other, and neither suggests the other's entries while you
-type. The UI always says "video code", never just "code", so the two never blur.
+Video codes and text codes are separate codebooks, never merged.
 
-**Marking.** Press `i` where something starts and `o` where it ends — both at the
-playhead, so it works while watching. A pulsing tick on the scrub bar shows an open
-start. `o` pauses playback and opens a picker over the dock listing the video codebook; the span ends where you pressed `o`, however long choosing takes. Type to narrow
-it, `Enter` to choose, or type a new name to add it. `Esc` in the picker keeps the
-start open, `Esc` elsewhere drops it. A code can carry its own key: with a start
-open, that key ends the span and codes it in one press. `x` deletes the span under
-the playhead, with an Undo.
+**Marking.** Press `i` where something starts and `o` where it ends, both at the
+playhead. An open start shows as a mark on the code rows. `o` pauses playback and
+opens a picker listing your video codes; the span ends where you pressed `o`.
+Type to narrow it, `Enter` to choose, or type a new name to add it. `Esc` in the
+picker keeps the start open, `Esc` elsewhere drops it. A code can carry its own
+key: with a start open, that key ends the span and codes it. `x` deletes your
+span under the playhead, with an Undo. Spans may overlap.
 
-**Where they show.** Never on the words — that is where quotes live.
+**Where they show.** Never on the words.
 
-- **Over the scrub bar**, a lane of coloured bars on the same scale as the bar
-  itself, overlapping spans stacked. Click a bar to go there; drag either end to
-  move that end.
-- **Down the time spine**, a thin band per span beside the blocks it covers.
-  Clicking one seeks there and opens it in the sidebar.
-- **The Video codes tab**, listing every span with its code, times and length,
-  a note, and a menu to recode it. Chips filter by code. Whatever is under the
-  playhead is marked in all three as it plays.
+- **Rows**, under the video: one row per coder (✓ Common when it has spans, you,
+  then others in collaborative mode) over a zoomable window that follows the
+  playhead. Click a span to seek; drag an end of your own span to move it. A name
+  too long for its span is cut off; hover shows code, coder and times.
+- **List**, the tab beside Rows: every span with its code, times, note, and a
+  menu to recode or delete it.
 
-**Beside the transcript.** With **Codes beside text** on (the default; the
-choice is remembered), each span is also listed in a column right of the text:
-its start time, code and length, set at the height of that moment in the
-transcript so it lines up with the block timestamps. Entries that would collide
-are nudged down rather than reordered. Turning it off hides both the column and
-the spine bands, leaving the text alone. The column needs a wide window and
-hides below about 60rem, like the spine.
+**Coding without the transcript.** **▶ Code video** opens `/code`: the video and
+its code rows only. Same keys, plus `,`/`.` for one-second steps and `m` to mute.
+Both pages re-read the files when they regain focus.
 
-**Coding without the transcript.** **▶ Code video** in the reader opens `/code`,
-a view with just the video, filling the window, and the Video codes panel. It
-uses the same keys (`i`, `o`, `x`, `Space`, `←`/`→`, `[`/`]`), adds `,`/`.` for
-one-second steps, and has a **mute** button (`m`, remembered) for coding what is
-on screen rather than what is said. It reads and writes the same files as the
-reader, and each page re-reads them when it regains focus, so the two can be
-open side by side.
+**The codebook.** Each coder has their own; edit it from the strip's ⋯ menu or
+the [Codebook page](#coders-modes-and-common-codes). Spans refer to a code by
+id, so a rename follows everywhere. A code in use cannot be deleted; merge it
+into another, or remove its spans first. Keys the pages already use (`j`, `k`,
+`h`, `i`, `o`, `m`, digits, …) cannot be code keys.
 
-**The codebook** is shared across the library, so a study codes consistently.
-*Manage video codes* in the tab renames, recolours, sets keys and describes what
-counts as each code. Spans refer to a code by id, so a rename is one edit that
-every span in every recording follows. A code nothing uses can be deleted; one in
-use has to be **merged** into another instead, which moves its spans first — a
-code cannot disappear out from under data. Keys the reader and the coding view already use (`j`, `k`,
-`h`, `i`, `o`, `m`, digits, …) and speaker keys cannot be code keys.
+**Storage.** Your codebook is `<study>/coders/<you>/video_codebook.json`; your
+spans are `<recording>/coders/<you>/video_codes.json`, in session seconds, so a
+span can cross an interruption and correcting a caption never moves one.
 
-**Storage.** The codebook is `library.video_codebook.json` at the library root
-(the recording folder itself when only one is open). Spans are
-`session.video_codes.json` beside each recording, in session seconds — the same
-continuous timeline as quotes, so a span can cross an interruption. Neither file
-depends on the transcript, so correcting a caption never moves a video code. Both
-are written atomically and moved aside to `.corrupt` rather than overwritten if
-they cannot be read, like every other file here.
+## Coders, modes and common codes
+
+- **Login.** On first open, pick your name from the coders in the study, or add
+  yourself with a name and initials. Initials must be unique. There is no
+  password. Change either from the badge in the header.
+- **Modes.** The header's switch applies to every page. *Independent* shows your
+  work and common codes. *Collaborative* adds everyone else's, labelled with
+  initials and read-only.
+- **Refresh.** ↻ Refresh reads what collaborators have synced, pushes your common
+  changes to the shared files, and collects items returned to you. The header
+  shows changes not yet pushed and warns about sync conflict copies.
+- **Codebook page** (`/codebook`). One codebook at a time, list beside the code
+  page: description, the themes holding the code, and every quote or span that
+  carries it, with checkboxes to remove them in bulk.
+- **Move to common** (⋯ menu). Confirm the code is final and give a description.
+  It becomes a new common code, or merges into an existing one; a name clash asks
+  merge or rename. Its quotes or spans move with it. Exact duplicates from two
+  coders combine: text on the same words, video with both ends within 0.5 s.
+  Anyone can edit common codes.
+- **Using a common code** in independent mode creates your own code of the same
+  name; move it to common later to merge.
+- **Return to coders** (⋯ menu on a common code). Each contributor gets their
+  quotes or spans back under their own code with the common code's name and
+  description. Common codes keep a History.
+- **Themes** follow the same modes. [Common themes](#themes-analysis-across-recordings)
+  hold only common codes; a theme can be moved to common once all its codes are.
+- Files from before coders (`session.highlights.json`, `session.video_codes.json`,
+  `library.video_codebook.json`, `library.themes.json`) are ignored and left on
+  disk.
 
 ## Finding quotes
 
 Exact matches rank first, then close ones (for when the transcript did not hear
 the word the way you remember it). Matching runs across block text, so a phrase
-split across two captions is still findable. `.*` switches to regex.
+split across two captions is still findable. `.*` switches to regex. Matches
+drop down under the search box.
 
 ## Checking the parse
 
@@ -557,7 +559,7 @@ without starting the server:
 subtitle-search --dump-parse /path/to/recording-folder
 ```
 
-It prints the speakers and cue counts, plus the part layout — which recording
+It prints the speakers, cue counts and quote counts per coder, plus the part layout — which recording
 starts at which session time, how long each runs, and how long each interruption
 was. A wrong order or a wrong duration silently shifts every timestamp after it,
 so that layout is the thing worth checking on real files.
@@ -618,8 +620,9 @@ a folder that holds none is read as a library of the folders beneath it (two
 levels deep, which is how these arrive). A folder whose transcript cannot be
 parsed is reported and skipped rather than taking the whole library down.
 
-The library lists every recording with its duration, speakers, quote count and
-tags, and searches every transcript at once. Results link straight to the moment
+The library lists every recording with its duration, speakers, quote count,
+text codes and video codes, following the mode switch, and searches every
+transcript at once. Results link straight to the moment
 in the reader.
 
 ## Sharing a study through Google Drive
@@ -665,29 +668,25 @@ such as Box.
 
 ### Folder layout
 
-The study folder is the library: one folder per participant, with the shared
-codebook next to them.
-
 ```
-pilots/                           ← point the tool here
-  library.video_codebook.json     ← the video code list, shared by every recording
-  library.themes.json             ← themes, if you use /themes
+pilots/                             ← point the tool here
+  coders/<id>/                      ← one folder per coder, written only by that coder
+    coder.json                      ← name and initials
+    text_codebook.json, video_codebook.json, themes.json, history.json
+    common/                         ← that coder's copy of the common files
+  common/                           ← shared common codes and themes, written on Refresh
   P'1/
     GMT…_Recording.mp4
-    GMT…_Recording.transcript.vtt ← each folder needs a .vtt to open
-  P'2/
-    …
-    session.highlights.json       ← quotes
-    session.video_codes.json      ← video code spans
-    session.words.json            ← measured word timings
-    audio…_original.vtt           ← backup written on the first correction
+    GMT…_Recording.transcript.vtt   ← each folder needs a .vtt to open
+    coders/<id>/quotes.json, video_codes.json, common/
+    common/                         ← shared common quotes, spans and returned items
+    session.words.json              ← measured word timings
+    audio…_original.vtt             ← backup written on the first correction
 ```
 
 Folders without a `.vtt` are skipped, and Google Docs shortcuts (`.gdoc`) are
-ignored. When you move a recording in, bring its `session.*.json` files and
-`_original.vtt` with it, and keep `library.video_codebook.json` at the top of
-the study folder. Spans refer to codes by id, so a span whose codebook stayed
-behind shows as *unknown code*.
+ignored. When you move a recording in, bring its whole folder, and keep the
+top-level `coders/` and `common/` at the top of the study folder.
 
 ### Running it
 
@@ -698,197 +697,112 @@ spaces and participant folders often have apostrophes:
 uv run subtitle-search "$HOME/Library/CloudStorage/GoogleDrive-<you@example.edu>/My Drive/<path>/pilots"
 ```
 
-Point it at the **study folder**, not a participant folder. Opened on its own, a
-participant folder gets its own codebook, which nobody else's recordings see.
+Point it at the **study folder**, not a participant folder. Opened alone, a
+participant folder has its own coders and codebooks.
 
-The tool reads the folder when it starts. To see what a collaborator saved,
-wait for Drive to finish syncing (the menu-bar icon), then restart the tool with
-Ctrl+C and the command again. In the reader and the coding view, switching back
-to the tab also re-reads the video codes.
+To see what a collaborator saved, wait for Drive to finish syncing, then press
+↻ Refresh.
 
-### Taking turns
+### Working at the same time
 
-Right now two people cannot safely work on the **same recording at the same
-time**. Every quote, correction and video code for a recording lives in shared
-files, and Drive does not merge JSON. If two saves cross, one person's changes
-are lost, or Drive keeps both versions as a duplicate file (for example
-`session.video_codes (1).json`) that the tool does not read. Editing the
-codebook while someone else does has the same risk.
-
-Until per-coder files exist (see [Not built yet](#not-built-yet)):
-
-- Split the work by recording: each person codes different participant folders.
-- Before starting a recording, let Drive finish syncing. When done, keep the
-  tool running for a few seconds so the last save uploads.
-- If a file like `… (1).json` appears, the two versions conflicted. Compare them
-  by hand before deleting either one.
+- Coding is safe in parallel: each coder writes only their own `coders/<id>/`
+  files, and common changes go to your copy first.
+- Transcript corrections are shared. Two people correcting the same recording
+  at once can conflict; take turns.
+- If a file like `… (1).json` appears, the sync client kept two versions. The
+  header warns about those beside the common files. Compare them by hand before deleting either.
 
 ## Themes: analysis across recordings
 
-`/themes` works on every quote in the library at once, in several views. They
-exist because the work has several shapes, and no single layout serves all of
-them. The canvas and the board are two shapes of the *same* grouping — a theme
-made on either appears on the other, because there is one file underneath.
+`/themes` groups codes into themes, in several views. A theme holds codes, text
+and video; their quotes and spans come along as evidence. A code can be in
+several themes. The canvas and the board show the same themes.
+
+- **Your themes** hold your codes and common codes. Collaborative mode adds
+  other coders' themes, read-only.
+- **Common themes** (✓) hold only common codes and anyone can edit them. ✓ on
+  your theme moves it to common, or merges it into a common theme, once all its
+  codes are common; until then it lists the codes to move first.
+- Moving, merging, deleting or returning a code updates the themes that hold it.
 
 ### Canvas — affinity diagramming on a plane
 
-Quotes as post-its on a surface that pans and zooms. Areas are themes; cards are
-quotes; where things sit is up to you.
+Code cards on a surface that pans and zooms. Areas are themes. Where things sit
+is up to you: two areas side by side, or a card parked between them, is part of
+the analysis.
 
-The board it replaces ran out of screen. Columns only work while they all fit,
-and past about six themes the useful ones are off the right-hand edge — which is
-the point at which the layout starts deciding what you think about. A plane has
-no right-hand edge.
-
-What the plane also gets you is what a column list cannot express at all. Two
-areas nudged up against each other is a claim you are making about them. An
-outlier parked on bare canvas between two areas is a quote you have not decided
-about. None of that is a field in the file; it is the arrangement, and the
-arrangement is the analysis.
-
-- **New area** makes a theme, in the middle of what you are looking at.
-- Drag quotes out of the **tray** on the left — same side as the board's
-  unsorted column — onto the plane. A study has hundreds of quotes, so they wait
-  in a list rather than being scattered across the surface on first open. A
-  quote leaves the list once it has a card anywhere.
-
-  Tray quotes are shown **whole**, never cut off, and each carries a **↗** to
-  where it was said. Deciding which theme a quote belongs to means reading it,
-  and a truncated list makes you drag each one out to find out what it says —
-  which is the decision, done backwards.
-- Drag an area **by the strip across the top of its title bar** and its quotes
-  travel with it. Card positions are stored relative to their area, so this is
-  two numbers changing and nothing can be left behind. The strip exists because
-  the bar is otherwise almost all controls — the title is a field, the note is a
-  field, the rest are buttons — which left the padding between them as the only
-  place to take hold of, and that is a knack rather than a handle. Like the rest
-  of the bar it does not scale, so it is the same easy target at any zoom.
-- **Resize** from the bottom-right corner. Cards a smaller box no longer covers
-  are pulled back inside rather than evicted — a quote does not stop being part
-  of a theme because you dragged the box in.
-- **▾ rolls an area up** to its title, note and count, keeping its size and
-  everything in it. A study's themes are not all live at once, and a finished one
-  taking a screenful of plane is a finished one in the way. Quotes can still be
-  dropped on a rolled-up area — the theme is closed, not shut — and **Roll up
-  all** does the lot, for seeing the shape of the whole study at once.
-- **⊞ tidy** packs one area's cards by speaker and then time *and writes it*,
-  for when free placement has become a pile you no longer want.
-- Drag a card **back to the tray** to put it away. Only that card: other copies
-  of the same quote stay where they are.
-- Drop a card on **bare canvas** to park it. It counts as dealt with — it leaves
-  the tray — without being filed in any theme.
-- **✕** deletes an area and offers an undo that restores the box, the note and
-  the arrangement inside it. The quotes were never at risk: they live in the
-  recordings, and without an area they simply return to the tray.
+- **New area** makes a theme in the middle of the view.
+- The **tray** on the left lists codes not yet on the canvas. Drag one onto the
+  plane. A code card shows name, colour, ✓ or initials, and count; ▶ marks a
+  video code. Open a card to read its quotes and spans; **↗** opens each in the
+  reader.
+- Drag an area **by the strip across the top of its title bar** and its cards
+  move with it.
+- **Resize** from the bottom-right corner; cards outside the new box are pulled
+  back inside.
+- **▾** rolls an area up to its title, note and count. **Roll up all** does
+  every area.
+- **⊞ tidy** packs an area's cards alphabetically and saves the layout.
+- Drag a card **back to the tray** to remove that card, or onto **bare canvas**
+  to park it outside any theme.
+- **✕** deletes an area. For your own themes it offers an Undo that restores
+  the box, note and cards.
 
 ### Theme names do not shrink
 
-Everything on the plane scales with the zoom except an area's title bar, which
-stays the size it would be in a sidebar. A quote shrinking as you pull back is
-fine — you are not reading it from there. A theme's *name* is what you navigate
-by, and a plane whose labels go illegible exactly when you zoom out to see all of
-them has given up the thing it was for.
-
-Holding that costs the bar some room, so it gives up its parts in order: the note
-and the recording spread go first, then the count, and last of all — only on a
-bar too narrow to press anything — the ▶ ⊞ ✕ buttons. The name keeps the width.
-A long name wraps rather than being cut off, and only shrinks — never below 9px —
-when a single word is wider than the whole area, which happens below about a
-quarter zoom. Zoomed out far enough, an area becomes a labelled tile, which is
-the right thing to be at a zoom where no quote is readable.
+An area's title bar stays the same size at any zoom. On a narrow bar the note and
+recording spread go first, then the count, then the ▶ ⊞ ✕ buttons. A long name
+wraps, and shrinks (never below 9px) only when one word is wider than the area.
 
 ### Grid, which changes nothing
 
-**Grid** draws every area's cards packed into rows and **writes nothing**. Free
-placement is the point of the plane, and it is also how an area ends up
-unreadable; this is how to read it without giving up the arrangement that made it
-unreadable. Turning it off puts everything back exactly where it was.
-
-It packs **by speaker, then by time**, which is the other half of what it is for.
-An area laid out that way is one voice at a time in the order it was said: the
-same person's three remarks about trust sit together, and the place where
-somebody else takes over is visible. A quote nobody is credited with sorts last,
-because those are the ones to fix rather than the ones to read first.
-
-`⊞ tidy` writes exactly that order, so grid view doubles as a preview of what
-tidying an area would commit — and because the order comes from the quotes and
-not from where they were dragged, tidying twice changes nothing.
-
-While grid view is on, a drag inside one area does nothing — there is nowhere to
-put anything — but dragging *between* areas still moves a card, and lands it in a
-clear slot.
-
-Speakers group across recordings, so if the same name interviews in all of them
-their quotes gather under it rather than staying with their sessions.
+**Grid** draws every area's cards packed alphabetically and **saves nothing**.
+Turning it off restores the free layout. `⊞ tidy` saves the same order. In grid
+view a drag inside one area does nothing; a drag between areas still moves a
+card.
 
 ### Filters
 
-Sorting a pile of three hundred quotes is not one job. It is "everything Priya
-said about trust", then "the untagged remainder", then "the three long ones I
-keep putting off" — and without a way to ask for those, the tray is a scroll bar.
-So the list narrows by **text** (across the quote, its note, its tags and its
-speaker), **tag** (a named one, or anything tagged at all, or nothing tagged),
-**speaker**, **recording**, **highlight colour**, and **whether it carries a
-note**; and it orders by recording, by length, or by how many tags a quote has.
-Every dimension is an "and": the point of having six is to arrive at a handful.
+The tray narrows by text (name and description), kind (text or ▶ video, used
+or not yet used), recording, colour, and whether the code has a description. It
+orders by recording, by count, or by how many recordings a code appears in.
+Filtering also highlights matching cards already on the plane.
 
-Filtering also marks the matching cards *already on the plane*, quieting the
-rest. Nothing is hidden and nothing moves — a filter is a question, and hiding a
-card would answer one nobody asked. It tells you the thing the list cannot: where
-the quotes you are asking about have already ended up.
+**A code can be on the canvas in two areas.** Alt-drag (or **Also place in…**)
+leaves the card where it is and adds a second card elsewhere.
 
-**The same quote can be pinned in two areas.** A card is one *appearance* of a
-quote, not the quote itself, so alt-drag (or **Also place in…**) leaves the
-original where it is and puts a second card elsewhere — photocopying a post-it to
-pin it to two walls. On the board those show as one quote in two columns, each
-card saying where else it appears.
+Every **↗** opens the transcript in a **new tab**, keeping your place here.
 
-Every **↗** — on a tray quote, on a card, on the board, in the matrix — opens
-the transcript in a **new tab**. Following it in place would throw away the pan,
-the zoom, the selection and a half-narrowed filter to answer a question that is
-usually "wait, what came before this?". The point of checking the context is to
-come back with it.
+Without a mouse: tab to a code in the tray and press enter to place it; tab to a
+card and the panel under the tray moves it between themes, arrow keys nudge it
+(shift for fine), delete removes it. Drag the background to pan, ctrl- or
+⌘-scroll to zoom, `0` to frame everything.
 
-Without a mouse: tab to a quote in the tray and press enter to put it on the
-plane; tab to a card and the panel under the tray moves it between themes, arrow
-keys nudge it (shift for fine), delete puts it away. Drag the background to pan,
-ctrl- or ⌘-scroll to zoom, `0` to frame everything.
-
-Which areas are rolled up lives in the study's file, because it is a statement
-about the work. The zoom, the pan and whether grid view is on stay in the
-browser: those are about you at this moment, not about the analysis.
-
-A themes file written before the canvas existed has no coordinates in it. The
-first open lays those themes out in a grid and packs each one's quotes inside,
-rather than opening empty and asking for sorting you already did.
+Rolled-up areas are saved in the themes file. Zoom, pan and grid view stay in
+the browser.
 
 ### Board — columns, for when there are few enough to see
 
-The same themes as columns, which is the right shape until there are more themes
-than fit across the screen. Drag is the fast path; every card also has a menu, so
-the board works without a mouse.
-
-The board's move is one theme at a time: choosing a theme there takes the quote
-out of the others. The canvas is where a quote goes into two themes at once,
-because there you can see that it did.
-
-Each column shows how many recordings it draws on, which is the difference
-between a theme and one person's preoccupation. The filter narrows the board to
-unsorted, tagged, or untagged quotes so you can work through a pile rather than
-stare at all of it.
+The same themes as columns. Drag a card, or use its menu to move it between your
+themes and common themes. Choosing a theme on the board moves the card out of
+its other themes; use the canvas to put a code in two. Each column shows how
+many recordings it draws on.
 
 ### Matrix — for when they do
 
-Tags down the side, recordings across the top, counts in the cells. Rows are
-sorted by how many recordings share the tag, so the findings float to the top and
+Text codes down the side, recordings across the top, counts in the cells. It
+follows the mode switch; in collaborative mode same-named codes of different
+coders are separate rows, labelled with initials. Rows are
+sorted by how many recordings share the code, so the findings float to the top and
 the singletons sink. Cell weight is ink, not a colour ramp, so a row reads at a
 glance without matching swatches to a legend.
 
-Click a tag for every quote carrying it; click a cell for one participant's.
+Click a code for every quote carrying it; click a cell for one participant's.
 
 ### Pairs — for when the codebook has drifted
 
-Tags that share a quote, strongest first. Two codes that always arrive together
+Text codes that share a quote, strongest first. A pair counts only within one
+coder's quotes, or within common quotes. Two codes that always arrive together
 are usually one code wearing two names, or a cause and its effect. It is the
 cheapest signal that a codebook needs consolidating.
 
@@ -899,14 +813,14 @@ pip install -e '.[analysis]'          # the map, graph and signals
 pip install -e '.[analysis,neural]'   # + understands paraphrase
 ```
 
-Every quote placed by what it *says*, not by what you tagged it. The clusters
+Every quote placed by what it *says*, not by how you coded it. The clusters
 here are formed by the language, so they can disagree with your themes — and
 where they do is either a theme you missed or a distinction you decided not to
-make. Drag a loop around a group to turn it into a theme.
+make. Drag a loop around a group to make a theme from those quotes' codes.
 
-Colour by your themes, by the clusters the language forms, or by recording.
+Colour by theme (the first theme holding any of a quote's codes), by the clusters the language forms, or by recording.
 Click any point for the quote and its nearest neighbours in meaning, and click
-through those to walk the corpus by similarity rather than by tag.
+through those to walk the corpus by similarity rather than by code.
 
 Two backends. **Word overlap** is the default: instant, local, no download, and
 honestly limited — it cannot tell that *"it never works"* and *"constantly
@@ -921,14 +835,14 @@ anywhere** — encoding happens in this process.
 
 ### Graph — the shape of the codebook
 
-Tags as a network, pulled together by the quotes they share. The same numbers as
+Text codes as a network, pulled together by the quotes they share. The same numbers as
 Pairs, arranged so you can see what clumps, what dangles off the side, and what
 sits on its own.
 
 ### Signals — is the study finished?
 
 The grounded-theory question, drawn as the curve it actually is: cumulative
-distinct tags against interviews, in the order they were recorded. A curve still
+distinct text codes against interviews, in the order they were recorded. A curve still
 climbing at the last participant is the study saying it is not done. It measures
 the codebook rather than the world, so a flat curve can equally mean you stopped
 noticing — worth reading as a prompt, not a verdict.
@@ -942,16 +856,14 @@ a person accepts it or does not.
 
 ### Listening to a theme
 
-Any theme, tag, or cell can be played straight through: each quote in turn, in
-the recording it came from, stopping at its own end. Tone is half of what a quote
+Any theme, code, or cell can be played straight through: each quote or span in
+turn, in the recording it came from, stopping at its own end. Tone is half of what a quote
 means and it does not survive being written down — being able to hear a theme
 rather than only read it is the reason the recordings are still attached.
 
-Themes are stored in `library.themes.json` at the root of the library, beside the
-recording folders rather than inside any one of them. A theme holds references,
-never copies, so correcting a transcript updates every theme that quote appears
-in, and deleting a quote in the reader removes it from its theme rather than
-leaving a hole.
+Your themes are stored in `<study>/coders/<you>/themes.json`; common themes in
+`<study>/common/themes.json` and `theme_cards.json`. A theme holds code
+references, never copies.
 
 ## Anonymizing a set of interviews
 
@@ -1073,15 +985,3 @@ pytest
 Tests run against synthetic VTT fixtures in `tests/fixtures.py`, including the
 mid-sentence-colon trap, CRLF endings, voice tags, speakerless transcripts, and
 byte-exact HTTP Range serving.
-
-## Not built yet
-
-Multi-recording library search. The backend is already namespaced by recording
-id with a registry, so adding it means writing a folder scanner and a fan-out
-search — not restructuring.
-
-Per-coder video codes for shared folders. Each coder enters their name, and their
-spans go to their own `session.video_codes.<name>.json`, so two people never
-write the same file. An **independent** mode shows only your own codes, for
-coding blind. A **collaborative** mode shows everyone's, labelled by coder, with
-other people's read-only. Changes on disk are picked up without a restart.

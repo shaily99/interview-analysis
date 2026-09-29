@@ -1,7 +1,7 @@
 /* Wiring, shared state, and the reading/following cursor state machine.
  *
  * Reading is the default and the point of the tool. The transcript starts in
- * READING mode with the dock minimized: the cursor follows where you are in the
+ * READING mode: the cursor follows where you are in the
  * text and quietly cues the player to match, so playback always starts where you
  * are looking. Pressing play switches to FOLLOWING, where the transcript keeps up
  * with the audio instead. Scrolling or moving the cursor by hand drops back to
@@ -22,9 +22,11 @@ import {
 } from "./transcript.js";
 import { cue, initPlayer, nudge, seekAndPlay, stepRate, togglePlay } from "./player.js";
 import { initSearch } from "./search.js";
-import { copySelection, hideQuoteBar, initHighlights, renderList, save } from "./highlights.js";
+import { copySelection, hideQuoteBar, initHighlights, refreshTextCodes, renderList, save } from "./highlights.js";
+import { currentCoder, ensureCoder, mountCoderControls } from "./coder.js";
 import { enterEdit, exitEdit, isEditing, splitAtWord } from "./editing.js";
 import { notify, working } from "./chrome.js";
+import { initPanes } from "./layout.js";
 import { initVideoCodes, reloadVideoCodes, videoCodeKey } from "./video_codes.js";
 
 const ctx = {
@@ -39,11 +41,9 @@ const ctx = {
     notices: $("notices"),
     roster: $("roster"),
     timing: $("timing"),
-    sidebar: $("sidebar"),
-    panelSearch: $("panel-search"),
+    panes: $("panes"),
+    searchDrop: $("search-drop"),
     panelHighlights: $("panel-highlights"),
-    tabSearch: $("tab-search"),
-    tabHighlights: $("tab-highlights"),
     themeToggle: $("theme-toggle"),
     libraryLink: $("library-link"),
     searchInput: $("search-input"),
@@ -82,13 +82,13 @@ const ctx = {
   cueById: new Map(),
   cueByIndex: new Map(),
   highlights: [],
-  knownTags: [],
-  // Every tag used anywhere in the library, for completing as you type.
+  // Every coder's text codes, and each one's use, for the strip and the chips.
+  textCodes: [],
   vocabulary: [],
   colors: ["amber"],
   paintedCues: new Set(),
   activeHighlightId: null,
-  tagFilter: null,
+  codeFilter: null,
   rosterEditing: null,
   pendingSelection: null,
   scrubbing: false,
@@ -102,15 +102,19 @@ ctx.working = (message) => working(ctx.el.notices, message);
 
 /* ------------------------------------------------------------------ tabs -- */
 
+/* The reader's panes are all on screen at once, so "showing" one means opening
+ * it if it was collapsed: the text codes pane, or the video codes pane on its
+ * List tab. Search results are the one thing that drops down instead. */
 ctx.showTab = (which) => {
-  const tabs = {
-    search: [ctx.el.tabSearch, ctx.el.panelSearch],
-    highlights: [ctx.el.tabHighlights, ctx.el.panelHighlights],
-    "video-codes": [$("tab-video-codes"), $("panel-video-codes")],
-  };
-  for (const [name, [tab, panel]] of Object.entries(tabs)) {
-    panel.hidden = name !== which;
-    tab.setAttribute("aria-pressed", String(name === which));
+  if (which === "search") {
+    ctx.openSearch?.();
+    return;
+  }
+  ctx.closeSearch?.();
+  if (which === "highlights") ctx.layout?.show("codes");
+  if (which === "video-codes") {
+    ctx.layout?.show("vcodes");
+    ctx.showVideoCodesTab?.("list");
   }
 };
 
@@ -136,6 +140,8 @@ function regroup(ctx) {
 /* ------------------------------------------------------------------ load -- */
 
 async function load() {
+  // Nothing is shown until we know who is coding: every quote is someone's.
+  await ensureCoder();
   const config = await api("/api/config");
   ctx.colors = config.colors;
   // The library links straight to a recording, and to a moment inside it.
@@ -156,7 +162,6 @@ async function load() {
   ctx.serverChunks = data.transcript.chunks;
   ctx.parts = data.transcript.parts || [];
   ctx.highlights = data.highlights;
-  ctx.knownTags = data.known_tags;
 
   for (const cueItem of data.transcript.cues) {
     ctx.cueById.set(cueItem.id, cueItem);
@@ -166,7 +171,7 @@ async function load() {
 
   document.title = data.title;
   ctx.el.title.textContent = data.title;
-  ctx.el.highlightsPath.textContent = data.highlights_file;
+  ctx.el.highlightsPath.textContent = `saved as ${currentCoder().initials}`;
 
   const diagnostics = data.transcript.diagnostics;
   ctx.el.meta.textContent = [
@@ -176,14 +181,11 @@ async function load() {
     data.media_file || "no media",
   ].join("  ·  ");
 
-  // Suggestions span the study, so a tag coined in one interview is offered in
-  // every other one. Not fatal if it fails -- the field still takes free text.
-  api("/api/library/vocabulary")
-    .then((data) => {
-      ctx.vocabulary = data.tags;
-      renderList(ctx);
-    })
-    .catch(() => {});
+  // Your codebook spans the study, so a code coined in one interview is offered
+  // in every other one.
+  refreshTextCodes(ctx).catch((error) =>
+    ctx.notify(`Could not load the text codes: ${error.message}`, { kind: "warn", key: null })
+  );
 
   ctx.onHighlightsChanged = () => {
     applyHighlights(ctx);
@@ -459,10 +461,28 @@ async function load() {
   initVideoCodes(ctx);
   $("coding-link").href = `/code?recording=${encodeURIComponent(ctx.recordingId)}`;
   window.addEventListener("focus", () => reloadVideoCodes(ctx).catch(() => {}));
+
+  // Whose work is on screen changes with the mode, or when you code as someone else.
+  const redrawForMode = () => {
+    ctx.activeHighlightId = null;
+    applyHighlights(ctx);
+    renderList(ctx);
+    ctx.onVideoCodesModeChange?.();
+  };
+  window.addEventListener("modechange", redrawForMode);
+  window.addEventListener("coderchange", () => {
+    ctx.el.highlightsPath.textContent = `saved as ${currentCoder().initials}`;
+    refreshTextCodes(ctx).then(redrawForMode).catch(() => {});
+  });
+  mountCoderControls(ctx.el.themeToggle.parentElement, {
+    onRefresh: async () => {
+      ctx.onTranscriptChanged(await api(`/api/recordings/${ctx.recordingId}`));
+      await refreshTextCodes(ctx);
+      await reloadVideoCodes(ctx);
+      ctx.notify("Refreshed from the folder.");
+    },
+  });
   renderList(ctx);
-  // Quotes are the output of a reading session, so that is what the sidebar
-  // opens on. Search is a keystroke away with `/`.
-  ctx.showTab("highlights");
   ctx.renderRoster();
   setCursor(ctx, 0);
 
@@ -482,14 +502,14 @@ async function load() {
     seekAndPlay(ctx, at);
     flashCue(ctx, ctx.chunks[index]?.cue_ids?.[0]);
   }
-  showDiagnostics(data, diagnostics);
+  showDiagnostics(data, diagnostics, config);
 }
 
-function showDiagnostics(data, diagnostics) {
-  if (data.migrated_from) {
+function showDiagnostics(data, diagnostics, config) {
+  if (config.legacy_files?.length) {
     ctx.notify(
-      `Quotes from ${data.migrated_from} were moved into ${data.highlights_file}. The original file was left in place as a backup.`,
-      { kind: "info", key: null }
+      `This folder has files from before coders (${config.legacy_files.join(", ")}). They are not shown and were left untouched.`,
+      { kind: "info", key: `subtitle-search:legacy:${config.legacy_files.join("|")}` }
     );
   }
 
@@ -635,6 +655,18 @@ window.addEventListener("resize", () => {
   updateSpine(ctx);
 });
 
+// Resizing or collapsing a pane moves the text, so what is laid out against it
+// -- the spine, and the quote cards beside their blocks -- is redone. The code
+// rows are drawn in proportions and need nothing.
+ctx.layout = initPanes(ctx.el.panes, {
+  storageKey: "subtitle-search:readerPanes",
+  onChange: () => {
+    if (!ctx.chunks.length) return;
+    cacheGeometry(ctx);
+    updateSpine(ctx);
+  },
+});
+
 /**
  * Give the block at the cursor a speaker, then move to the next one.
  *
@@ -769,8 +801,6 @@ document.addEventListener("keydown", (event) => {
 
 /* ----------------------------------------------------------------- chrome -- */
 
-ctx.el.tabSearch.addEventListener("click", () => ctx.showTab("search"));
-ctx.el.tabHighlights.addEventListener("click", () => ctx.showTab("highlights"));
 
 const THEME_KEY = "subtitle-search:theme";
 const applyTheme = (theme) => {

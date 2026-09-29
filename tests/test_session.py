@@ -182,7 +182,7 @@ def test_single_transcript_folder_still_works(tmp_path):
     assert len(recording.transcript.parts) == 1
     assert recording.transcript.parts[0].offset == 0
     assert recording.transcript.cues[0].start == pytest.approx(2.18)
-    assert recording.store.path.name == "session.highlights.json"
+    assert recording.store.list() == []
 
 
 def test_generic_filenames_pair_by_stem(tmp_path):
@@ -197,41 +197,59 @@ def test_generic_filenames_pair_by_stem(tmp_path):
     assert parts[1].media_path.name == "zoom_1.mp4"
 
 
-def test_quotes_are_adopted_from_an_older_per_transcript_file(tmp_path):
-    """Upgrading a folder must not orphan quotes saved by the previous scheme."""
+def test_old_shared_files_are_reported_and_left_alone(tmp_path):
+    """Files from before coders are neither loaded nor touched, only reported."""
     (tmp_path / "meeting.vtt").write_text(fixtures.COLON_PREFIX)
-    legacy = tmp_path / "meeting.highlights.json"
-    legacy.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "highlights": [
-                    {
-                        "id": "old123",
-                        "text": "share my screen",
-                        "start_cue_id": "c0",
-                        "end_cue_id": "c0",
-                        "start_char_offset": 27,
-                        "end_char_offset": 42,
-                        "start_time": 5.0,
-                        "end_time": 6.0,
-                        "color": "amber",
-                        "note": "kept",
-                        "tags": ["demo"],
-                    }
-                ],
-            }
-        )
-    )
+    old = tmp_path / "session.highlights.json"
+    old.write_text(json.dumps({"version": 1, "highlights": [{"id": "old123", "text": "x"}]}))
+    (tmp_path / "session.video_codes.json").write_text("{}")
 
     recording = open_recording(tmp_path)
 
-    assert recording.store.migrated_from == "meeting.highlights.json"
-    assert [h["id"] for h in recording.store.list()] == ["old123"]
-    assert recording.store.list()[0]["note"] == "kept"
-    # The original is left untouched as a backup.
-    assert legacy.exists()
-    assert (tmp_path / "session.highlights.json").exists()
+    assert recording.store.list() == []
+    assert sorted(recording.legacy_files) == ["session.highlights.json", "session.video_codes.json"]
+    assert json.loads(old.read_text())["highlights"][0]["id"] == "old123"
+
+
+def _quote():
+    return {"text": "share my screen", "start_cue_id": "c0", "start_char_offset": 27,
+            "end_cue_id": "c0", "end_char_offset": 42}
+
+
+def test_a_coders_quotes_live_in_their_folder_inside_the_recording(tmp_path):
+    (tmp_path / "meeting.vtt").write_text(fixtures.COLON_PREFIX)
+    recording = open_recording(tmp_path)
+
+    recording.store.create("ann", _quote())
+
+    assert (tmp_path / "coders" / "ann" / "quotes.json").is_file()
+    assert [q["coder"] for q in open_recording(tmp_path).store.list()] == ["ann"]
+
+
+def test_a_quote_may_only_carry_its_coders_own_text_codes(tmp_path):
+    from subtitle_search.highlights import HighlightError
+    from subtitle_search.session import CoderBooks
+
+    (tmp_path / "meeting.vtt").write_text(fixtures.COLON_PREFIX)
+    books = CoderBooks(tmp_path)
+    mine = books.text("ann").add({"name": "trust"})
+    theirs = books.text("ben").add({"name": "trust"})
+    recording = open_recording(tmp_path, books)
+
+    assert recording.store.create("ann", {**_quote(), "codes": [mine["id"]]})["codes"] == [mine["id"]]
+    with pytest.raises(HighlightError):
+        recording.store.create("ann", {**_quote(), "codes": [theirs["id"]]})
+
+
+def test_refresh_picks_up_a_coder_who_synced_in_since_opening(tmp_path):
+    (tmp_path / "meeting.vtt").write_text(fixtures.COLON_PREFIX)
+    recording = open_recording(tmp_path)
+    other = open_recording(tmp_path)  # a collaborator's copy, writing the same folder
+    other.store.create("ben", _quote())
+
+    assert recording.store.list() == []
+    recording.refresh()
+    assert [q["coder"] for q in recording.store.list()] == ["ben"]
 
 
 def test_single_part_digest_matches_plain_content(tmp_path):
@@ -243,3 +261,56 @@ def test_single_part_digest_matches_plain_content(tmp_path):
 
     assert recording.transcript.sha256 == parse_vtt(fixtures.COLON_PREFIX).sha256
     assert recording.store.stale is False
+
+
+def test_a_correction_never_loses_quotes_a_collaborator_synced_in(tmp_path):
+    """Ben's tool loaded Ann's quotes earlier; Ann has saved more since. Ben correcting
+    a caption must not write his stale copy of Ann's file back over hers."""
+    from subtitle_search.editing import apply_cue_edit
+
+    (tmp_path / "meeting.vtt").write_text(fixtures.COLON_PREFIX)
+    ann = open_recording(tmp_path)
+    ann.store.create("ann", _quote())
+    ben = open_recording(tmp_path)  # sees Ann's one quote
+    ann.store.create("ann", {**_quote(), "text": "second"})  # synced in after Ben loaded
+
+    cue = ben.transcript.cue("c2")
+    apply_cue_edit(ben, "c2", cue.text + " Indeed.")
+
+    saved = json.loads((tmp_path / "coders" / "ann" / "quotes.json").read_text())["highlights"]
+    assert len(saved) == 2
+
+
+
+def test_reading_an_unreadable_coder_file_leaves_it_where_it_is(tmp_path):
+    """A half-synced file in someone's folder is theirs; opening the study must not
+    rename it away, or the sync client deletes it from their folder."""
+    from subtitle_search.coders import CoderDirectory
+    from subtitle_search.session import CoderBooks
+
+    (tmp_path / "meeting.vtt").write_text(fixtures.COLON_PREFIX)
+    folder = tmp_path / "coders" / "cat"
+    folder.mkdir(parents=True)
+    for name in ("quotes.json", "video_codes.json", "coder.json", "text_codebook.json"):
+        (folder / name).write_text("{half synced")
+
+    recording = open_recording(tmp_path)
+    CoderDirectory(tmp_path).list()
+    CoderBooks(tmp_path).all_text()
+    recording.store.restamp()
+
+    assert sorted(p.name for p in folder.iterdir()) == ["coder.json", "quotes.json", "text_codebook.json", "video_codes.json"]
+    assert (folder / "quotes.json").read_text() == "{half synced"
+
+
+def test_your_own_unreadable_file_is_still_kept_aside_before_you_write(tmp_path):
+    (tmp_path / "meeting.vtt").write_text(fixtures.COLON_PREFIX)
+    mine = tmp_path / "coders" / "ann" / "quotes.json"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("{broken")
+
+    recording = open_recording(tmp_path)
+    recording.store.create("ann", _quote())
+
+    assert (mine.parent / "quotes.json.corrupt").read_text() == "{broken"
+    assert len(json.loads(mine.read_text())["highlights"]) == 1

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codebook</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f0f1ec'/%3E%3Crect x='9' y='4' width='1.5' height='24' fill='%23d3d7c9'/%3E%3Crect x='8' y='11' width='3.5' height='10' rx='1.75' fill='%233d3bd4'/%3E%3Crect x='15' y='9' width='11' height='1.6' rx='.8' fill='%231c1f1b'/%3E%3Crect x='15' y='15' width='9' height='1.6' rx='.8' fill='%231c1f1b'/%3E%3Crect x='15' y='21' width='11' height='1.6' rx='.8' fill='%231c1f1b'/%3E%3C/svg%3E">
+</head>
+<body class="page">
+
+<header class="topbar">
+  <div class="topbar__identity">
+    <h1 class="topbar__title">Codebook</h1>
+    <p class="topbar__meta" id="meta"></p>
+  </div>
+
+  <div class="topbar__search">
+    <span class="seg" role="group" aria-label="Which codebook">
+      <button type="button" data-kind="text" aria-pressed="true">Text codes</button>
+      <button type="button" data-kind="video" aria-pressed="false">Video codes</button>
+    </span>
+  </div>
+
+  <div class="topbar__actions">
+    <nav class="tabs">
+      <a class="btn" href="/">Recordings</a>
+      <a class="btn" href="/themes">Themes</a>
+      <a class="btn" href="/codebook" aria-current="page">Codebook</a>
+    </nav>
+    <button class="btn btn--icon" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme">◐</button>
+  </div>
+</header>
+
+<div class="notices" id="notices"></div>
+
+<main class="cbook">
+  <aside class="cbook__list" id="code-list" aria-label="Codes"></aside>
+  <section class="cbook__page" id="code-page" aria-live="polite"></section>
+</main>
+
+<script type="module" src="/static/codebook.js"></script>
+</body>
+</html>

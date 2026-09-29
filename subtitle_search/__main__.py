@@ -25,7 +25,14 @@ def _dump_parse(registry: RecordingRegistry) -> int:
         transcript = recording.transcript
         diagnostics = transcript.diagnostics()
         print(f"\n{recording.title}")
-        print(f"  highlights : {recording.store.path.name}")
+        quotes = recording.store.list()
+        initials = {c["id"]: c["initials"] for c in registry.coders.list()}
+        per_coder = {}
+        for quote in quotes:
+            who = initials.get(quote["coder"], quote["coder"])
+            per_coder[who] = per_coder.get(who, 0) + 1
+        split = ", ".join(f"{who} {n}" for who, n in sorted(per_coder.items()))
+        print(f"  quotes     : {len(quotes)}" + (f" ({split})" if split else ""))
         print(f"  duration   : {format_timestamp(diagnostics['duration'])}")
         print(f"  cues       : {diagnostics['cue_count']}")
         print(f"  chunks     : {diagnostics['chunk_count']}")

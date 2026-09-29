@@ -26,6 +26,7 @@
     <nav class="tabs">
       <a class="btn" href="/" aria-current="page">Recordings</a>
       <a class="btn" href="/themes">Themes</a>
+      <a class="btn" href="/codebook">Codebook</a>
     </nav>
     <button class="btn btn--icon" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme">◐</button>
   </div>
@@ -52,10 +53,18 @@
 
   <section id="tags-section" hidden>
     <header class="sheet__head">
-      <h2 class="sheet__title">Tags across the library</h2>
+      <h2 class="sheet__title">Text codes across the library</h2>
       <span class="sheet__count" id="tag-count"></span>
     </header>
     <div class="tag-rail" id="tag-rail"></div>
+  </section>
+
+  <section id="video-section" hidden>
+    <header class="sheet__head">
+      <h2 class="sheet__title">Video codes across the library</h2>
+      <span class="sheet__count" id="video-count"></span>
+    </header>
+    <div class="tag-rail" id="video-rail"></div>
   </section>
 </main>
 

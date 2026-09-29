@@ -1,7 +1,9 @@
-"""Persistent highlight storage.
+"""Persistent quote storage.
 
-Highlights live in ``<vtt-basename>.highlights.json`` next to the recording, so
-they travel with the folder rather than living in a database somewhere else.
+``HighlightStore`` is one coder's quotes in one recording, in
+``<recording>/coders/<id>/quotes.json``. Each quote carries ``codes``: ids from
+that coder's text codebook. ``SessionQuotes`` joins every coder's store and the
+common quotes for a recording; it writes only to the caller's own store.
 
 Two properties matter here. Writes are atomic, because autosaving on every edit
 means a crash would otherwise be able to truncate the file mid-write and take a
@@ -23,6 +25,9 @@ from typing import Any
 from .models import Transcript
 
 SCHEMA_VERSION = 1
+
+#: One coder's quotes in one recording, at ``<recording>/coders/<id>/``.
+QUOTES_FILENAME = "quotes.json"
 
 #: Colors are named here and rendered by the frontend, so the stored file stays
 #: readable and does not hard-code a hex value that a restyle would orphan.
@@ -82,28 +87,53 @@ def resolve_span(transcript: Transcript, payload: dict) -> dict:
     }
 
 
-def _normalize_tags(raw: Any) -> list[str]:
+def _normalize_codes(raw: Any, codebook) -> list[str]:
+    """Text code ids, in order and without repeats, each one from the coder's codebook."""
     if not isinstance(raw, list):
         return []
     seen: list[str] = []
-    for tag in raw:
-        cleaned = str(tag).strip()
-        if cleaned and cleaned not in seen:
-            seen.append(cleaned)
+    for item in raw:
+        code_id = str(item).strip()
+        if not code_id or code_id in seen:
+            continue
+        if codebook is not None and codebook.get(code_id) is None:
+            raise HighlightError("that text code is not in your codebook")
+        seen.append(code_id)
     return seen
 
 
 class HighlightStore:
     """Reads and writes one recording's highlights file."""
 
-    def __init__(self, path: Path, transcript: Transcript):
+    def __init__(self, path: Path, transcript: Transcript, codebook=None):
         self.path = path
         self.transcript = transcript
-        #: Set when quotes were adopted from an older per-transcript file.
-        self.migrated_from: str | None = None
+        #: The coder's text codebook, which every code on a quote must come from.
+        self.codebook = codebook
+        #: True when the file exists but could not be read. It is then left alone,
+        #: and only moved aside to ``.corrupt`` when its owner saves over it.
+        self.unreadable = False
         self._data = self._load()
-        if self.migrated_from:
-            self._write()
+        self._seen = self._disk_stamp()
+
+    def _disk_stamp(self):
+        try:
+            return self.path.stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def sync(self) -> None:
+        """Re-read the file if something else wrote it since this store last did.
+
+        Another coder's file is synced in by the folder's sync client while this
+        tool runs. Before re-anchoring their quotes after a caption correction, the
+        store must start from what is on disk now, not from what it loaded, or
+        writing it back would erase whatever they saved in between.
+        """
+        if self._disk_stamp() != self._seen:
+            self.unreadable = False
+            self._data = self._load()
+            self._seen = self._disk_stamp()
 
     # -- persistence ------------------------------------------------------
 
@@ -113,58 +143,35 @@ class HighlightStore:
             "vtt_file": self.transcript.source_name,
             "vtt_sha256": self.transcript.sha256,
             "updated_at": _now(),
-            "known_tags": [],
             "highlights": [],
         }
 
-    def _adopt_legacy(self) -> dict | None:
-        """Pick up quotes from an older per-transcript file, if one exists.
-
-        Earlier versions named the file after the transcript. Once a folder is
-        read as one session there is a single quotes file, so the old one is
-        adopted rather than left behind. The original is never deleted or
-        modified -- it stays on disk as a backup.
-        """
-        candidates = [
-            path
-            for path in sorted(self.path.parent.glob("*.highlights.json"))
-            if path != self.path and path.is_file()
-        ]
-        for candidate in candidates:
-            try:
-                data = json.loads(candidate.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if isinstance(data, dict) and data.get("highlights"):
-                self.migrated_from = candidate.name
-                data.setdefault("known_tags", [])
-                return data
-        return None
-
     def _load(self) -> dict:
         if not self.path.exists():
-            return self._adopt_legacy() or self._empty()
+            return self._empty()
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             # Never destroy an unreadable file by overwriting it with an empty
-            # one -- move it aside so the user still has whatever was in there.
-            backup = self.path.with_suffix(self.path.suffix + ".corrupt")
-            try:
-                os.replace(self.path, backup)
-            except OSError:
-                pass
+            # one. It is left where it is -- in a synced study it may be another
+            # coder's, half-synced -- and moved aside only before a write.
+            self.unreadable = True
             return self._empty()
         if not isinstance(data, dict):
             return self._empty()
         data.setdefault("version", SCHEMA_VERSION)
         data.setdefault("highlights", [])
-        data.setdefault("known_tags", [])
         if not isinstance(data["highlights"], list):
             data["highlights"] = []
         return data
 
     def _write(self) -> None:
+        if self.unreadable:
+            try:
+                os.replace(self.path, self.path.with_suffix(self.path.suffix + ".corrupt"))
+            except OSError:
+                pass
+            self.unreadable = False
         self._data["updated_at"] = _now()
         self._data["vtt_file"] = self.transcript.source_name
         self._data["vtt_sha256"] = self.transcript.sha256
@@ -181,10 +188,18 @@ class HighlightStore:
         )
         try:
             with handle:
-                json.dump(self._data, handle, indent=2, ensure_ascii=False)
+                # The coder is known from the folder; the label is for readers only.
+                data = {
+                    **self._data,
+                    "highlights": [
+                        {k: v for k, v in h.items() if k != "coder"} for h in self._data["highlights"]
+                    ],
+                }
+                json.dump(data, handle, indent=2, ensure_ascii=False)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(handle.name, self.path)
+            self._seen = self._disk_stamp()
         except BaseException:
             Path(handle.name).unlink(missing_ok=True)
             raise
@@ -200,14 +215,6 @@ class HighlightStore:
     def list(self) -> list[dict]:
         return sorted(self._data["highlights"], key=lambda h: h.get("start_time", 0.0))
 
-    def known_tags(self) -> list[str]:
-        tags: list[str] = list(self._data.get("known_tags") or [])
-        for highlight in self._data["highlights"]:
-            for tag in highlight.get("tags") or []:
-                if tag not in tags:
-                    tags.append(tag)
-        return sorted(tags, key=str.lower)
-
     def _find(self, highlight_id: str) -> dict | None:
         return next((h for h in self._data["highlights"] if h.get("id") == highlight_id), None)
 
@@ -219,6 +226,7 @@ class HighlightStore:
             raise HighlightError("cannot highlight an empty selection")
 
         span = resolve_span(self.transcript, payload)
+        codes = _normalize_codes(payload.get("codes"), self.codebook)
         color = payload.get("color") or DEFAULT_COLOR
         if color not in COLORS:
             color = DEFAULT_COLOR
@@ -229,13 +237,12 @@ class HighlightStore:
             "text": text,
             "color": color,
             "note": str(payload.get("note") or ""),
-            "tags": _normalize_tags(payload.get("tags")),
+            "codes": codes,
             "created_at": timestamp,
             "updated_at": timestamp,
             **span,
         }
         self._data["highlights"].append(highlight)
-        self._merge_tags(highlight["tags"])
         self._write()
         return highlight
 
@@ -244,12 +251,14 @@ class HighlightStore:
         if highlight is None:
             raise KeyError(highlight_id)
 
+        # Checked before anything changes, so a refused code leaves the quote as it was.
+        codes = _normalize_codes(patch["codes"], self.codebook) if "codes" in patch else None
+
         # Merge in place so fields written by another version are carried through.
         if "note" in patch:
             highlight["note"] = str(patch["note"] or "")
-        if "tags" in patch:
-            highlight["tags"] = _normalize_tags(patch["tags"])
-            self._merge_tags(highlight["tags"])
+        if codes is not None:
+            highlight["codes"] = codes
         if "color" in patch and patch["color"] in COLORS:
             highlight["color"] = patch["color"]
         if any(key in patch for key in ("start_cue_id", "end_cue_id")):
@@ -260,6 +269,28 @@ class HighlightStore:
         highlight["updated_at"] = _now()
         self._write()
         return highlight
+
+    def count_code(self, code_id: str) -> int:
+        return sum(1 for h in self._data["highlights"] if code_id in (h.get("codes") or []))
+
+    def reassign_code(self, from_id: str, to_id: str) -> int:
+        """Put ``to_id`` wherever ``from_id`` was, once per quote."""
+        moved = 0
+        for highlight in self._data["highlights"]:
+            codes = highlight.get("codes") or []
+            if from_id not in codes:
+                continue
+            merged: list[str] = []
+            for code_id in codes:
+                code_id = to_id if code_id == from_id else code_id
+                if code_id not in merged:
+                    merged.append(code_id)
+            highlight["codes"] = merged
+            highlight["updated_at"] = _now()
+            moved += 1
+        if moved:
+            self._write()
+        return moved
 
     def delete(self, highlight_id: str) -> bool:
         highlight = self._find(highlight_id)
@@ -354,7 +385,8 @@ class HighlightStore:
             highlight["updated_at"] = _now()
             touched.append(highlight)
 
-        self._write()
+        if touched:
+            self._write()
         return touched
 
     def remap_split(
@@ -432,8 +464,151 @@ class HighlightStore:
         """Record the transcript's new digest after an edit, so it reads as current."""
         self._write()
 
-    def _merge_tags(self, tags: list[str]) -> None:
-        known = self._data.setdefault("known_tags", [])
-        for tag in tags:
-            if tag not in known:
-                known.append(tag)
+
+class SessionQuotes:
+    """Every coder's quotes in one recording, one store per coder.
+
+    Reads return everyone's quotes, each labelled with its coder, so the browser
+    can show one coder's or all of them. Writes go to the coder's own store, and a
+    write to someone else's quote is refused: in collaborative mode other people's
+    work is visible but read-only. Transcript corrections are shared, so re-anchoring
+    after a correction runs over every coder's quotes.
+    """
+
+    def __init__(self, stores: dict[str, HighlightStore], factory=None, common=None, returns=None):
+        self.stores = dict(stores)
+        #: Makes the store for a coder who has not saved a quote here yet.
+        self.factory = factory
+        #: The agreed quotes of this recording (a common.CommonQuotes), shown to everyone.
+        self.common = common
+        #: Items returned from common, waiting to be claimed; re-anchored with the rest.
+        self.returns = returns
+        #: The transcript quotes are anchored in, kept here too so common quotes can
+        #: be re-anchored in a recording where no coder has a quote of their own.
+        self._transcript = None
+        #: Who is correcting the transcript. Common quotes re-anchored by the
+        #: correction are written to this coder's own copy of common.
+        self.acting: str | None = None
+
+    @staticmethod
+    def _label(coder: str, highlight: dict) -> dict:
+        # In place, so a caller holding a quote sees later re-anchoring, as with
+        # a single store. The store leaves the label out when it writes.
+        highlight["coder"] = coder
+        return highlight
+
+    def list(self) -> list[dict]:
+        quotes = [self._label(c, h) for c, store in self.stores.items() for h in store.list()]
+        if self.common is not None:
+            quotes += self.common.list()
+        return sorted(quotes, key=lambda h: h.get("start_time", 0.0))
+
+    def count_code(self, code_id: str) -> int:
+        return sum(store.count_code(code_id) for store in self.stores.values())
+
+    def reassign_code(self, from_id: str, to_id: str) -> int:
+        return sum(store.reassign_code(from_id, to_id) for store in self.stores.values())
+
+    def owner(self, highlight_id: str) -> str | None:
+        return next((c for c, s in self.stores.items() if s._find(highlight_id)), None)
+
+    def _own(self, coder: str, highlight_id: str) -> HighlightStore:
+        owner = self.owner(highlight_id)
+        if owner is None:
+            raise KeyError(highlight_id)
+        if owner != coder:
+            raise PermissionError("that quote belongs to another coder")
+        return self.stores[owner]
+
+    def store_for(self, coder: str) -> HighlightStore:
+        if coder not in self.stores:
+            if self.factory is None:
+                raise KeyError(coder)
+            self.stores[coder] = self.factory(coder)
+        return self.stores[coder]
+
+    def create(self, coder: str, payload: dict) -> dict:
+        return self._label(coder, self.store_for(coder).create(payload))
+
+    def update(self, coder: str, highlight_id: str, patch: dict) -> dict:
+        return self._label(coder, self._own(coder, highlight_id).update(highlight_id, patch))
+
+    def delete(self, coder: str, highlight_id: str) -> bool:
+        return self._own(coder, highlight_id).delete(highlight_id)
+
+    @property
+    def transcript(self):
+        return self._transcript
+
+    @transcript.setter
+    def transcript(self, transcript) -> None:
+        self._transcript = transcript
+        for store in self.stores.values():
+            store.transcript = transcript
+
+    @property
+    def stale(self) -> bool:
+        return any(store.stale for store in self.stores.values())
+
+    @property
+    def unreadable(self) -> bool:
+        """Whether any coder's quotes here could not be read, so the list is incomplete."""
+        return any(store.unreadable for store in self.stores.values())
+
+    def _each(self, method: str, *args) -> list[dict]:
+        touched = []
+        for coder, store in self.stores.items():
+            store.sync()
+            # A file that could not be read is someone's, mid-sync: leave it be.
+            if store.unreadable:
+                continue
+            touched.extend(self._label(coder, h) for h in getattr(store, method)(*args))
+        touched.extend(self._common_each(method, *args))
+        return touched
+
+    def _common_each(self, method: str, *args) -> list[dict]:
+        """Re-anchor the common quotes, and returned items waiting to be claimed, as the acting coder."""
+        from .common import remap_returns
+
+        if self.common is None or not self.acting or self.transcript is None:
+            return []
+        moved = self.common.remap(self.acting, method, self.transcript, *args)
+        if self.returns is not None:
+            remap_returns(self.returns, self.acting, method, self.transcript, *args)
+        return moved
+
+    def remap_cue(self, cue_id: str, old_text: str, new_text: str) -> list[dict]:
+        return self._each("remap_cue", cue_id, old_text, new_text)
+
+    def remap_split(self, split_index: int, split_offset: int, head_len: int, tail_lead: int) -> list[dict]:
+        return self._each("remap_split", split_index, split_offset, head_len, tail_lead)
+
+    def remap_merge(self, first_index: int, starts: list[int], lengths: list[int]) -> list[dict]:
+        return self._each("remap_merge", first_index, starts, lengths)
+
+    def restate_speaker(self, cue_ids, speaker: str | None) -> list[dict]:
+        return self._each("restate_speaker", list(cue_ids), speaker)
+
+    def restamp(self) -> None:
+        for store in self.stores.values():
+            store.sync()
+            if not store.unreadable:
+                store.restamp()
+
+
+class _Scratch:
+    """Common quotes held like a store's, so HighlightStore's re-anchoring can run on them.
+
+    Nothing is written from here; the caller puts the records that moved back
+    into common as the coder making the correction.
+    """
+
+    def __init__(self, highlights: list[dict], transcript):
+        self._data = {"highlights": highlights}
+        self.transcript = transcript
+
+    def _write(self) -> None:
+        pass
+
+    def _remap(self, move):
+        return HighlightStore._remap(self, move)

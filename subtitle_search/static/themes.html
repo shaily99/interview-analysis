@@ -31,6 +31,7 @@
     <nav class="tabs">
       <a class="btn" href="/">Recordings</a>
       <a class="btn" href="/themes" aria-current="page">Themes</a>
+      <a class="btn" href="/codebook">Codebook</a>
     </nav>
     <button class="btn btn--icon" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme">◐</button>
   </div>
@@ -72,8 +73,8 @@
                aria-label="Search the text of the quotes not yet on the canvas">
         <div class="tray__filters">
           <label class="tray__filter">
-            <span>Tag</span>
-            <select id="filter-tag" aria-label="Filter by tag"></select>
+            <span>Text code</span>
+            <select id="filter-tag" aria-label="Filter by text code"></select>
           </label>
           <label class="tray__filter">
             <span>Said by</span>
@@ -101,7 +102,7 @@
               <option value="recording">by recording</option>
               <option value="longest">longest first</option>
               <option value="shortest">shortest first</option>
-              <option value="tags">most tags first</option>
+              <option value="tags">most text codes first</option>
             </select>
           </label>
         </div>
@@ -139,8 +140,8 @@
       <select id="board-filter">
         <option value="all">every quote</option>
         <option value="unplaced">only unsorted</option>
-        <option value="tagged">only tagged</option>
-        <option value="untagged">only untagged</option>
+        <option value="tagged">only coded</option>
+        <option value="untagged">only uncoded</option>
       </select>
     </label>
     <span class="board__hint" id="board-progress"></span>
@@ -152,7 +153,7 @@
      and which belong to one person. -->
 <main class="sheet" id="view-matrix" hidden>
   <header class="sheet__head">
-    <h2 class="sheet__title">Tags by recording</h2>
+    <h2 class="sheet__title">Text codes by recording</h2>
     <span class="sheet__count" id="matrix-note"></span>
   </header>
   <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
@@ -163,7 +164,7 @@
      code, or a cause and its effect. -->
 <main class="sheet" id="view-pairs" hidden>
   <header class="sheet__head">
-    <h2 class="sheet__title">Tags that travel together</h2>
+    <h2 class="sheet__title">Text codes that travel together</h2>
     <span class="sheet__count" id="pairs-note"></span>
   </header>
   <div id="pairs"></div>
@@ -200,12 +201,12 @@
 <!-- Graph: tags as a network, pulled together by the quotes they share. -->
 <main class="stage" id="view-graph" hidden>
   <div class="stage__toolbar">
-    <span class="board__hint">tags pull together when they share quotes · drag a node to pull it out</span>
+    <span class="board__hint">text codes pull together when they share quotes · drag a node to pull it out</span>
   </div>
   <div class="stage__body">
-    <svg class="graph" id="graph" role="img" aria-label="Tags linked by shared quotes"></svg>
+    <svg class="graph" id="graph" role="img" aria-label="Text codes linked by shared quotes"></svg>
     <aside class="stage__side" id="graph-side">
-      <p class="empty">Click a tag to see its quotes and what it travels with.</p>
+      <p class="empty">Click a text code to see its quotes and what it travels with.</p>
     </aside>
   </div>
 </main>
@@ -213,7 +214,7 @@
 <!-- Signals: is the study finished, and what refuses to group. -->
 <main class="sheet" id="view-signals" hidden>
   <header class="sheet__head">
-    <h2 class="sheet__title">Are new interviews still finding new tags?</h2>
+    <h2 class="sheet__title">Are new interviews still finding new text codes?</h2>
     <span class="sheet__count" id="saturation-note"></span>
   </header>
   <div id="saturation"></div>

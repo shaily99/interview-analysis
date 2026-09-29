@@ -59,16 +59,34 @@ def quote(index: int, tags: list[str], color: str = "amber") -> dict:
     }
 
 
+#: Every quote in these fixtures is coded by one coder, whose codebook lives at
+#: the study root and whose quotes live in each recording's coder folder.
+CODER = "tester"
+
+
 def make_recording(root, name: str, quotes: list[dict] | None = None, media: bool = True):
+    from subtitle_search.codebook import TextCodebook
+
     folder = root / name
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "session.vtt").write_text(TRANSCRIPT, encoding="utf-8")
     if media:
         write_mp4(folder / "session.mp4", 120)
     if quotes is not None:
-        (folder / "session.highlights.json").write_text(
-            json.dumps({"version": 1, "known_tags": [], "highlights": quotes})
-        )
+        book = TextCodebook(root / "coders" / CODER / "text_codebook.json")
+        stored = []
+        for q in quotes:
+            q = dict(q)
+            names = q.pop("tags", [])
+            q["codes"] = [(book.find(n) or book.add({"name": n}))["id"] for n in names]
+            stored.append(q)
+        path = folder / "coders" / CODER / "quotes.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"version": 1, "highlights": stored}))
+    coder_file = root / "coders" / CODER / "coder.json"
+    if not coder_file.exists():
+        coder_file.parent.mkdir(parents=True, exist_ok=True)
+        coder_file.write_text(json.dumps({"id": CODER, "name": "Test Coder", "initials": "TC"}))
     return folder
 
 
@@ -78,6 +96,12 @@ def library(tmp_path):
     make_recording(root, "P01", [quote(1, ["trust"]), quote(2, ["timestamps", "tone"])])
     make_recording(root, "P02", [quote(3, ["timestamps"]), quote(4, [])])
     make_recording(root, "P03", [quote(5, ["trust", "timestamps"])])
+    # Video codes too, so the canvas tests have codes enough to arrange.
+    from subtitle_search.video_codes import VideoCodebook
+
+    video = VideoCodebook(root / "coders" / CODER / "video_codebook.json")
+    for name in ("clicks", "hesitates", "scrolls"):
+        video.add({"name": name})
     return root
 
 
@@ -85,7 +109,7 @@ def library(tmp_path):
 def client(library):
     registry = RecordingRegistry()
     registry.add_library(library)
-    return TestClient(create_app(registry)), registry
+    return TestClient(create_app(registry), headers={"X-Coder": CODER}), registry
 
 
 # -- discovery ---------------------------------------------------------
@@ -229,8 +253,7 @@ def test_theme_round_trip(client, library):
     assert created.status_code == 201
     theme = created.json()["theme"]
 
-    quotes = api.get("/api/library/quotes").json()["quotes"]
-    ref = quotes[0]["ref"]
+    ref = refs_of(api)[0]
 
     api.post("/api/library/themes/assign", json={"ref": ref, "theme_id": theme["id"]})
     listing = api.get("/api/library/themes").json()
@@ -238,7 +261,8 @@ def test_theme_round_trip(client, library):
     assert listing["themes"][0]["refs"] == [ref]
     assert listing["placed"] == [ref]
     # Themes live beside the recordings, not inside any one of them.
-    assert (library / THEMES_FILENAME).exists()
+    # Each coder's themes are their own file, beside their codebooks.
+    assert (library / "coders" / CODER / "themes.json").exists()
 
 
 def test_a_quote_belongs_to_one_theme_at_a_time(client):
@@ -246,7 +270,7 @@ def test_a_quote_belongs_to_one_theme_at_a_time(client):
     api, _ = client
     first = api.post("/api/library/themes", json={"title": "One"}).json()["theme"]
     second = api.post("/api/library/themes", json={"title": "Two"}).json()["theme"]
-    ref = api.get("/api/library/quotes").json()["quotes"][0]["ref"]
+    ref = refs_of(api)[0]
 
     api.post("/api/library/themes/assign", json={"ref": ref, "theme_id": first["id"]})
     body = api.post(
@@ -261,7 +285,7 @@ def test_a_quote_belongs_to_one_theme_at_a_time(client):
 def test_assigning_to_no_theme_returns_a_quote_to_unsorted(client):
     api, _ = client
     theme = api.post("/api/library/themes", json={"title": "One"}).json()["theme"]
-    ref = api.get("/api/library/quotes").json()["quotes"][0]["ref"]
+    ref = refs_of(api)[0]
 
     api.post("/api/library/themes/assign", json={"ref": ref, "theme_id": theme["id"]})
     api.post("/api/library/themes/assign", json={"ref": ref, "theme_id": None})
@@ -283,22 +307,39 @@ def test_renaming_and_deleting_a_theme(client):
     assert api.delete(f"/api/library/themes/{theme['id']}").status_code == 404
 
 
-def test_a_theme_referring_to_a_deleted_quote_is_pruned(tmp_path):
-    """A quote deleted in the reader must not leave a hole nothing accounts for."""
+def test_a_theme_referring_to_a_code_that_is_gone_is_pruned(tmp_path):
+    """A code deleted from the codebook must not leave a hole nothing accounts for."""
     root = tmp_path / "study"
     make_recording(root, "P01", [quote(1, ["trust"])])
     registry = RecordingRegistry()
     registry.add_library(root)
-    api = TestClient(create_app(registry))
+    api = TestClient(create_app(registry), headers={"X-Coder": CODER})
 
     theme = api.post("/api/library/themes", json={"title": "T"}).json()["theme"]
-    ref = api.get("/api/library/quotes").json()["quotes"][0]["ref"]
+    ref = refs_of(api)[0]
     api.post("/api/library/themes/assign", json={"ref": ref, "theme_id": theme["id"]})
 
-    recording = registry.list()[0]
-    recording.store.delete("q1")
+    registry.books.text(CODER).remove(ref.split(":", 1)[1])
 
     assert api.get("/api/library/themes").json()["themes"][0]["refs"] == []
+
+
+def test_themes_are_not_pruned_while_a_codebook_cannot_be_read(tmp_path):
+    """A half-synced codebook looks like deleted codes; pruning then would take
+    a coder's codes out of every theme."""
+    root = tmp_path / "study"
+    make_recording(root, "P01", [quote(1, ["trust"])])
+    registry = RecordingRegistry()
+    registry.add_library(root)
+    api = TestClient(create_app(registry), headers={"X-Coder": CODER})
+    theme = api.post("/api/library/themes", json={"title": "T"}).json()["theme"]
+    ref = refs_of(api)[0]
+    api.post("/api/library/themes/assign", json={"ref": ref, "theme_id": theme["id"]})
+
+    (root / "coders" / CODER / "text_codebook.json").write_text("{half synced")
+    registry.refresh()
+
+    assert api.get("/api/library/themes").json()["themes"][0]["refs"] == [ref]
 
 
 def test_themes_survive_a_reload(tmp_path, library):
@@ -333,7 +374,7 @@ def test_unknown_fields_in_the_themes_file_survive(tmp_path):
 
 def test_assigning_to_an_unknown_theme_is_a_404(client):
     api, _ = client
-    ref = api.get("/api/library/quotes").json()["quotes"][0]["ref"]
+    ref = refs_of(api)[0]
     assert api.post(
         "/api/library/themes/assign", json={"ref": ref, "theme_id": "nope"}
     ).status_code == 404
@@ -353,7 +394,8 @@ def test_assigning_without_a_reference_is_a_400(client):
 
 
 def refs_of(api):
-    return [q["ref"] for q in api.get("/api/library/quotes").json()["quotes"]]
+    """The codes a theme can hold, which is what the canvas arranges."""
+    return [c["ref"] for c in api.get("/api/library/codes", params={"mode": "independent"}).json()["codes"]]
 
 
 def overlapping(cards):
@@ -424,10 +466,10 @@ def test_placing_a_quote_puts_a_card_where_it_was_dropped(client):
 
     body = api.post(
         "/api/library/canvas/place",
-        json={"ref": ref, "theme_id": theme["id"], "x": 40, "y": 120},
+        json={"ref": ref, "theme_id": theme["id"], "x": 40, "y": 120, "coder": CODER},
     ).json()
 
-    assert body["cards"] == [{"ref": ref, "theme_id": theme["id"], "x": 40.0, "y": 120.0}]
+    assert body["cards"] == [{"ref": ref, "theme_id": theme["id"], "x": 40.0, "y": 120.0, "coder": CODER}]
     assert body["themes"][0]["refs"] == [ref]
     assert body["placed"] == [ref]
     assert body["on_canvas"] == [ref]
@@ -442,10 +484,10 @@ def test_a_card_dropped_on_bare_canvas_is_on_it_without_being_in_a_theme(client)
     api, _ = client
     ref = refs_of(api)[0]
     body = api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": None, "x": 900, "y": 40}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": None, "x": 900, "y": 40, "coder": CODER}
     ).json()
 
-    assert body["cards"] == [{"ref": ref, "theme_id": None, "x": 900.0, "y": 40.0}]
+    assert body["cards"] == [{"ref": ref, "theme_id": None, "x": 900.0, "y": 40.0, "coder": CODER}]
     assert body["placed"] == []
     assert body["on_canvas"] == [ref]
 
@@ -458,7 +500,7 @@ def test_dragging_a_card_between_areas_moves_it(client):
 
     api.post(
         "/api/library/canvas/place",
-        json={"ref": ref, "theme_id": first["id"], "x": 20, "y": 100},
+        json={"ref": ref, "theme_id": first["id"], "x": 20, "y": 100, "coder": CODER},
     )
     body = api.post(
         "/api/library/canvas/place",
@@ -491,11 +533,11 @@ def test_the_same_quote_can_be_pinned_in_two_areas(client):
 
     api.post(
         "/api/library/canvas/place",
-        json={"ref": ref, "theme_id": first["id"], "x": 20, "y": 100},
+        json={"ref": ref, "theme_id": first["id"], "x": 20, "y": 100, "coder": CODER},
     )
     body = api.post(
         "/api/library/canvas/place",
-        json={"ref": ref, "theme_id": second["id"], "x": 20, "y": 100},
+        json={"ref": ref, "theme_id": second["id"], "x": 20, "y": 100, "coder": CODER},
     ).json()
 
     assert len(body["cards"]) == 2
@@ -514,13 +556,13 @@ def test_only_one_card_per_quote_per_area(client):
     ref = refs_of(api)[0]
 
     api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100, "coder": CODER}
     )
     body = api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 60, "y": 200}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 60, "y": 200, "coder": CODER}
     ).json()
 
-    assert body["cards"] == [{"ref": ref, "theme_id": theme["id"], "x": 60.0, "y": 200.0}]
+    assert body["cards"] == [{"ref": ref, "theme_id": theme["id"], "x": 60.0, "y": 200.0, "coder": CODER}]
 
 
 def test_putting_a_card_away_leaves_the_other_copies(client):
@@ -531,7 +573,7 @@ def test_putting_a_card_away_leaves_the_other_copies(client):
     for theme in (first, second):
         api.post(
             "/api/library/canvas/place",
-            json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100},
+            json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100, "coder": CODER},
         )
 
     body = api.post(
@@ -581,7 +623,7 @@ def test_moving_an_area_carries_its_quotes(client):
     theme = api.post("/api/library/themes", json={"title": "One"}).json()["theme"]
     ref = refs_of(api)[0]
     api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 40, "y": 120}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 40, "y": 120, "coder": CODER}
     )
 
     moved = api.post(
@@ -590,7 +632,7 @@ def test_moving_an_area_carries_its_quotes(client):
     assert (moved["x"], moved["y"]) == (1500.0, 900.0)
 
     cards = api.get("/api/library/themes").json()["cards"]
-    assert cards == [{"ref": ref, "theme_id": theme["id"], "x": 40.0, "y": 120.0}]
+    assert cards == [{"ref": ref, "theme_id": theme["id"], "x": 40.0, "y": 120.0, "coder": CODER}]
 
 
 def test_shrinking_an_area_pulls_its_quotes_back_inside(client):
@@ -599,7 +641,7 @@ def test_shrinking_an_area_pulls_its_quotes_back_inside(client):
     theme = api.post("/api/library/themes", json={"title": "One"}).json()["theme"]
     ref = refs_of(api)[0]
     api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 260, "y": 240}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 260, "y": 240, "coder": CODER}
     )
 
     small = api.post(
@@ -631,7 +673,7 @@ def test_tidying_packs_an_area_and_grows_it_to_fit(client):
     for ref in refs:
         api.post(
             "/api/library/canvas/place",
-            json={"ref": ref, "theme_id": theme["id"], "x": 30, "y": 100},
+            json={"ref": ref, "theme_id": theme["id"], "x": 30, "y": 100, "coder": CODER},
         )
 
     body = api.post("/api/library/canvas/tidy", json={"theme_id": theme["id"]}).json()
@@ -654,79 +696,6 @@ def named(index: int, speaker: str, start: float, tags=()) -> dict:
     }
 
 
-def test_tidying_orders_by_speaker_then_by_time(tmp_path):
-    """One voice at a time, each running in the order it was said.
-
-    A theme read that way is one you can argue with: the same person's remarks
-    sit together, and the place where somebody else takes over is visible.
-    """
-    root = tmp_path / "study"
-    make_recording(
-        root,
-        "P01",
-        [
-            named(1, "Rafael Ortiz", 90.0),
-            named(2, "Dana Whitfield", 30.0),
-            named(3, "Rafael Ortiz", 10.0),
-            named(4, "Dana Whitfield", 60.0),
-        ],
-    )
-    registry = RecordingRegistry()
-    registry.add_library(root)
-    api = TestClient(create_app(registry))
-
-    theme = api.post("/api/library/themes", json={"title": "T"}).json()["theme"]
-    quotes = api.get("/api/library/quotes").json()["quotes"]
-    by_ref = {q["ref"]: q for q in quotes}
-    # Placed in a deliberately unhelpful order, and scattered.
-    for offset, ref in enumerate(reversed([q["ref"] for q in quotes])):
-        api.post(
-            "/api/library/canvas/place",
-            json={"ref": ref, "theme_id": theme["id"], "x": 200 - offset * 30, "y": 300 - offset * 20},
-        )
-
-    body = api.post("/api/library/canvas/tidy", json={"theme_id": theme["id"]}).json()
-    packed = sorted(body["cards"], key=lambda c: (c["y"], c["x"]))
-    assert [
-        (by_ref[c["ref"]]["speaker"], by_ref[c["ref"]]["start_time"]) for c in packed
-    ] == [
-        ("Dana Whitfield", 30.0),
-        ("Dana Whitfield", 60.0),
-        ("Rafael Ortiz", 10.0),
-        ("Rafael Ortiz", 90.0),
-    ]
-
-
-def test_a_quote_nobody_is_credited_with_packs_last(tmp_path):
-    """Unattributed quotes are the ones to fix, not the ones to read first."""
-    root = tmp_path / "study"
-    make_recording(
-        root,
-        "P01",
-        [
-            {**named(1, "", 5.0), "speaker": None},
-            named(2, "Zoe Nakamura", 99.0),
-            named(3, "Dana Whitfield", 50.0),
-        ],
-    )
-    registry = RecordingRegistry()
-    registry.add_library(root)
-    api = TestClient(create_app(registry))
-
-    theme = api.post("/api/library/themes", json={"title": "T"}).json()["theme"]
-    by_ref = {q["ref"]: q for q in api.get("/api/library/quotes").json()["quotes"]}
-    for ref in by_ref:
-        api.post("/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"]})
-
-    body = api.post("/api/library/canvas/tidy", json={"theme_id": theme["id"]}).json()
-    packed = sorted(body["cards"], key=lambda c: (c["y"], c["x"]))
-    assert [by_ref[c["ref"]]["speaker"] for c in packed] == [
-        "Dana Whitfield",
-        "Zoe Nakamura",
-        None,
-    ]
-
-
 def test_tidying_twice_changes_nothing(client):
     """The order comes from the quotes, so it does not depend on where they were."""
     api, _ = client
@@ -746,7 +715,7 @@ def test_positions_are_saved_in_one_batch(client):
     for ref in refs:
         api.post(
             "/api/library/canvas/place",
-            json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100},
+            json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100, "coder": CODER},
         )
 
     body = api.post(
@@ -770,12 +739,12 @@ def test_a_card_cannot_be_repositioned_outside_its_own_area(client):
     theme = api.post("/api/library/themes", json={"title": "One"}).json()["theme"]
     ref = refs_of(api)[0]
     api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100, "coder": CODER}
     )
 
     body = api.post(
         "/api/library/canvas/positions",
-        json={"moves": [{"ref": ref, "theme_id": theme["id"], "x": 9000, "y": 9000}]},
+        json={"moves": [{"ref": ref, "theme_id": theme["id"], "x": 9000, "y": 9000, "coder": CODER}]},
     ).json()
 
     card, area = body["cards"][0], body["themes"][0]
@@ -825,7 +794,7 @@ def test_deleting_an_area_returns_its_quotes_to_the_tray(client):
     theme = api.post("/api/library/themes", json={"title": "One"}).json()["theme"]
     ref = refs_of(api)[0]
     api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100, "coder": CODER}
     )
 
     api.delete(f"/api/library/themes/{theme['id']}")
@@ -882,29 +851,6 @@ def test_a_new_area_made_away_from_the_canvas_is_still_findable_on_it(client):
             ), "two areas were created on top of each other"
 
 
-def test_deleting_a_quote_removes_its_card_too(tmp_path):
-    """A card with nothing behind it would be a blank rectangle nobody can move."""
-    root = tmp_path / "study"
-    make_recording(root, "P01", [quote(1, ["trust"]), quote(2, [])])
-    registry = RecordingRegistry()
-    registry.add_library(root)
-    api = TestClient(create_app(registry))
-
-    theme = api.post("/api/library/themes", json={"title": "T"}).json()["theme"]
-    for ref in refs_of(api):
-        api.post(
-            "/api/library/canvas/place",
-            json={"ref": ref, "theme_id": theme["id"], "x": 20, "y": 100},
-        )
-
-    registry.list()[0].store.delete("q1")
-    body = api.get("/api/library/themes").json()
-
-    assert len(body["cards"]) == 1
-    assert body["cards"][0]["ref"].endswith(":q2")
-    assert body["themes"][0]["refs"] == body["on_canvas"]
-
-
 def test_a_card_left_over_an_areas_title_is_pulled_off_it(tmp_path):
     """The theme's own name is the one thing that must always be readable.
 
@@ -955,13 +901,15 @@ def test_the_board_and_the_canvas_are_one_grouping(client):
 def test_a_lassoed_theme_arrives_on_the_canvas_too(client):
     """The map's "make a theme from these" has to answer with the whole canvas."""
     api, _ = client
-    refs = refs_of(api)[:3]
+    quotes = [q for q in api.get("/api/library/quotes").json()["quotes"] if q["codes"]][:3]
+    codes = {f"text:{c}" for q in quotes for c in q["codes"]}
     body = api.post(
-        "/api/library/themes/from-refs", json={"title": "Lassoed", "refs": refs}
+        "/api/library/themes/from-refs", json={"title": "Lassoed", "refs": [q["ref"] for q in quotes]}
     ).json()
 
-    assert set(body["theme"]["refs"]) == set(refs)
-    assert {c["ref"] for c in body["cards"]} == set(refs)
+    # A theme holds codes, so the lassoed quotes' codes are what arrive.
+    assert set(body["theme"]["refs"]) == codes
+    assert {c["ref"] for c in body["cards"]} == codes
     assert not overlapping(body["cards"])
 
 
@@ -969,7 +917,7 @@ def test_canvas_calls_against_an_unknown_theme_are_404s(client):
     api, _ = client
     ref = refs_of(api)[0]
     assert api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": "nope", "x": 0, "y": 0}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": "nope", "x": 0, "y": 0, "coder": CODER}
     ).status_code == 404
     assert api.post(
         "/api/library/canvas/reshape", json={"theme_id": "nope", "x": 0}
@@ -1017,7 +965,7 @@ def test_an_area_can_be_rolled_up_to_its_title(client):
 
     ref = refs_of(api)[0]
     api.post(
-        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 40, "y": 120}
+        "/api/library/canvas/place", json={"ref": ref, "theme_id": theme["id"], "x": 40, "y": 120, "coder": CODER}
     )
 
     rolled = api.patch(
@@ -1029,7 +977,7 @@ def test_an_area_can_be_rolled_up_to_its_title(client):
 
     body = api.get("/api/library/themes").json()
     assert body["themes"][0]["refs"] == [ref]
-    assert body["cards"] == [{"ref": ref, "theme_id": theme["id"], "x": 40.0, "y": 120.0}]
+    assert body["cards"] == [{"ref": ref, "theme_id": theme["id"], "x": 40.0, "y": 120.0, "coder": CODER}]
 
     opened = api.patch(
         f"/api/library/themes/{theme['id']}", json={"collapsed": False}
@@ -1147,9 +1095,10 @@ def test_vocabulary_keeps_a_tag_whose_quotes_all_lost_it(client):
     recording = next(r for r in registry.list() if r.title == "P01")
     quote = recording.store.list()[0]
 
-    # Applied through the store, which is what records it as history.
-    recording.store.update(quote["id"], {"tags": ["provisional"]})
-    recording.store.update(quote["id"], {"tags": []})
+    # A code lives in the codebook, so taking it off its last quote keeps it.
+    code = registry.books.text(CODER).add({"name": "provisional"})
+    recording.store.update(CODER, quote["id"], {"codes": [code["id"]]})
+    recording.store.update(CODER, quote["id"], {"codes": []})
 
     entry = next((e for e in vocabulary(registry) if e["tag"] == "provisional"), None)
     assert entry is not None, "a tag used once should stay in the vocabulary"
@@ -1178,3 +1127,22 @@ def test_vocabulary_of_an_untagged_library_is_empty(tmp_path):
     from subtitle_search.library import vocabulary
 
     assert vocabulary(registry) == []
+
+
+def test_one_unreadable_transcript_does_not_leave_refresh_half_done(tmp_path):
+    """Every recording picks up the reloaded codebooks even if one transcript is
+    mid-sync and cannot be parsed."""
+    root = tmp_path / "study"
+    make_recording(root, "P01", [quote(1, ["trust"])])
+    make_recording(root, "P02", [quote(2, ["trust"])])
+    registry = RecordingRegistry()
+    registry.add_library(root)
+    (root / "P01" / "session.vtt").write_text("not a transcript at all")
+
+    registry.refresh()
+
+    fresh = registry.books.text(CODER).add({"name": "new after refresh"})
+    later = next(r for r in registry.list() if r.title == "P02")
+    updated = later.store.update(CODER, "q2", {"codes": [fresh["id"]]})
+    assert updated["codes"] == [fresh["id"]]
+    assert any(name == "P01" for name, _ in registry.failures)

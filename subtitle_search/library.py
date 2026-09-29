@@ -1,27 +1,19 @@
 """Working across a whole set of recordings.
 
-The reader is built around one session. Thematic analysis is not: it needs every
-quote in the study at once, grouped by what they are about rather than by which
-interview they came from. This module flattens the per-recording quote files
-into one corpus, and stores the themes built on top of it.
+Flattens every recording's quotes (all coders' and common) into one corpus for
+the library and themes pages, filtered by mode, and stores the themes.
 
-Themes live in ``library.themes.json`` at the root of the library, beside the
-recording folders rather than inside any of them, because a theme belongs to the
-study and not to a participant. A theme holds references, never copies: the
-quote text stays in the recording's own file, so correcting a transcript still
-updates every theme that quote appears in.
+A theme holds codes, as refs ``text:<id>`` or ``video:<id>``, never copies.
 
-The same themes are worked on two ways. The board is columns; the canvas is a
-plane, where a theme is a resizable area and a quote is a card sitting somewhere
-inside it. So the file records geometry as well as membership: an area's box, and
-a position for every card. Membership is *derived* from the cards -- a card
-inside an area is a quote in that theme -- because two records of one fact is two
-records to get out of step. ``refs`` is kept in sync as the shape the board reads.
+- ``ThemeStore``: one coder's themes, ``<study>/coders/<id>/themes.json``.
+  Another coder's store is opened read-only.
+- ``CommonThemeStore``: common themes, kept in ``common/themes.json`` and
+  ``common/theme_cards.json`` with newest-wins records, like common codes.
 
-A card, not a quote, is the thing on the canvas. That distinction is what lets a
-quote sit in two themes at once: two cards, one quote, the way you would
-photocopy a post-it to pin it to two walls. Only one card per quote per area,
-though, so a slip of the hand cannot quietly stack a quote on top of itself.
+The file records geometry as well as membership: an area's box and a position
+for every card. Membership is derived from the cards (a card inside an area is a
+code in that theme); ``refs`` is kept in sync for the board. One card per code
+per area; a code in two themes has two cards.
 """
 
 from __future__ import annotations
@@ -33,6 +25,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .common import COMMON
 
 THEMES_FILENAME = "library.themes.json"
 SCHEMA_VERSION = 2
@@ -195,20 +189,136 @@ def quote_ref(recording_id: str, highlight_id: str) -> str:
     return f"{recording_id}:{highlight_id}"
 
 
-def all_quotes(registry) -> list[dict]:
-    """Every quote in the library, tagged with where it came from."""
+def code_names(quote: dict, books) -> list[str]:
+    """A quote's text codes as names, read from its coder's codebook.
+
+    The library, themes and analysis views were built on tag names, so they are
+    handed names; a code missing from the codebook is skipped.
+    """
+    if books is None or not quote.get("coder"):
+        return []
+    codebook = books.text(quote["coder"])
+    names = []
+    for code_id in quote.get("codes") or []:
+        code = codebook.get(code_id)
+        if code:
+            names.append(code["name"])
+    return names
+
+
+MODES = ("independent", "collaborative")
+
+
+def code_label(name: str, coder: str, mode: str | None, initials: dict) -> str:
+    """How a code is named on the analysis pages.
+
+    In collaborative mode two coders may each have a code called "trust"; they
+    stay separate entries, told apart by initials, until they are agreed in common.
+    """
+    return f"{name} · {initials.get(coder, '?')}" if mode == "collaborative" else name
+
+
+def all_quotes(registry, mode: str | None = None, coder: str | None = None) -> list[dict]:
+    """The library's quotes, with where they came from and their codes by name.
+
+    With no mode, every coder's quotes: theme membership is pruned against this
+    list, so a filtered one would delete other coders' quotes from themes. With a
+    mode, what that mode shows: the caller's own (independent) or everyone's,
+    their codes labelled with initials (collaborative).
+    """
+    initials = {**({c["id"]: c["initials"] for c in registry.coders.list()} if registry.coders else {}), COMMON: "✓"}
     quotes: list[dict] = []
     for recording in registry.list():
         for highlight in recording.store.list():
+            # Common quotes are agreed, so every mode shows them.
+            if mode == "independent" and highlight.get("coder") not in (coder, COMMON):
+                continue
+            names = code_names(highlight, registry.books)
             quotes.append(
                 {
                     **highlight,
+                    "tags": [code_label(n, highlight.get("coder"), mode, initials) for n in names],
                     "ref": quote_ref(recording.id, highlight["id"]),
                     "recording_id": recording.id,
                     "recording_title": recording.title,
                 }
             )
     return quotes
+
+
+def code_items(registry, mode: str | None = None, coder: str | None = None) -> list[dict]:
+    """Every code the mode shows, shaped for the themes page's cards.
+
+    A theme holds codes, and its cards are codes: each item says what the code
+    is called (``text``, labelled with initials in collaborative mode), whose it
+    is, how many quotes or spans carry it and in which recordings, and those
+    applications themselves, so a card can open to show its evidence and play it.
+    """
+    initials = {**({c["id"]: c["initials"] for c in registry.coders.list()} if registry.coders else {}), COMMON: "✓"}
+    uses: dict[str, list[dict]] = {}
+    for recording in registry.list():
+        for quote in recording.store.list():
+            for code_id in quote.get("codes") or []:
+                uses.setdefault(f"text:{code_id}", []).append({
+                    "ref": quote_ref(recording.id, quote["id"]), "recording_id": recording.id,
+                    "recording_title": recording.title, "start_time": quote.get("start_time", 0),
+                    "end_time": quote.get("end_time", 0), "text": quote.get("text", ""),
+                    "speaker": quote.get("speaker"), "coder": quote.get("coder"),
+                })
+        for span in recording.video_codes.list():
+            uses.setdefault(f"video:{span['code_id']}", []).append({
+                "ref": quote_ref(recording.id, span["id"]), "recording_id": recording.id,
+                "recording_title": recording.title, "start_time": span["start"], "end_time": span["end"],
+                "text": span.get("note") or "", "speaker": None, "coder": span.get("coder"),
+            })
+    items = []
+    for kind, pairs in (("text", registry.books.all_text()), ("video", registry.books.all_video())):
+        for owner, code in pairs:
+            if mode == "independent" and owner not in (coder, COMMON):
+                continue
+            ref = f"{kind}:{code['id']}"
+            applications = sorted(uses.get(ref, []), key=lambda a: (a["recording_title"], a["start_time"]))
+            items.append({
+                "ref": ref, "kind": kind, "id": code["id"], "name": code["name"],
+                "text": code_label(code["name"], owner, mode, initials), "color": code.get("color"),
+                "description": code.get("description", ""), "coder": owner, "count": len(applications),
+                "recordings": sorted({a["recording_id"] for a in applications}), "applications": applications,
+            })
+    return sorted(items, key=lambda i: (i["text"].lower(), i["kind"]))
+
+
+def code_packing_order(items: list[dict]) -> dict[str, tuple]:
+    """How tidying orders code cards: alphabetically by name, text codes before video."""
+    return {i["ref"]: (0, i["name"].lower(), 0 if i["kind"] == "text" else 1, "") for i in items}
+
+
+def video_index(registry, mode: str | None = None, coder: str | None = None) -> list[dict]:
+    """Video codes with their span counts per recording, as the mode shows them."""
+    initials = {**({c["id"]: c["initials"] for c in registry.coders.list()} if registry.coders else {}), COMMON: "✓"}
+    entries: dict[str, dict] = {}
+    for recording in registry.list():
+        for span in recording.video_codes.list():
+            if mode == "independent" and span.get("coder") not in (coder, COMMON):
+                continue
+            code = registry.books.video(span["coder"]).get(span["code_id"])
+            if code is None:
+                continue
+            entry = entries.setdefault(
+                code["id"],
+                {
+                    "id": code["id"],
+                    "name": code_label(code["name"], span["coder"], mode, initials),
+                    "color": code["color"],
+                    "coder": span["coder"],
+                    "span_count": 0,
+                    "recordings": {},
+                },
+            )
+            entry["span_count"] += 1
+            entry["recordings"][recording.id] = entry["recordings"].get(recording.id, 0) + 1
+    for entry in entries.values():
+        entry["recording_count"] = len(entry["recordings"])
+    return sorted(entries.values(), key=lambda e: (-e["recording_count"], -e["span_count"], e["name"].lower()))
 
 
 def tag_index(quotes: list[dict]) -> list[dict]:
@@ -243,45 +353,35 @@ def tag_index(quotes: list[dict]) -> list[dict]:
 
 
 def vocabulary(registry) -> list[dict]:
-    """Every tag ever used anywhere in the library, for suggesting completions.
+    """Every coder's text codes, with how widely each is used, for picking while coding.
 
-    Wider than ``tag_index``, deliberately. That one reports tags with quotes
-    behind them right now; this one also keeps tags whose last quote was
-    untagged or deleted, because the reason to show a vocabulary while typing is
-    to stop a fifth near-duplicate of a code you already invented.
-
-    Each recording's quotes file already remembers its own tags permanently, so
-    the union of those is durable without another file to keep in sync.
+    Entries keep the ``tag`` key the chip field reads, alongside the code's id,
+    colour and coder, so a coder picks their own codes by name.
     """
-    entries: dict[str, dict] = {}
-
-    def entry(tag: str) -> dict:
-        return entries.setdefault(
-            tag, {"tag": tag, "quote_count": 0, "recording_count": 0, "recordings": []}
-        )
-
+    uses: dict[str, dict] = {}
     for recording in registry.list():
-        # History first: tags typed here at any point, even if nothing carries
-        # them now.
-        for tag in recording.store.known_tags():
-            entry(tag)
-
-        used: set[str] = set()
         for highlight in recording.store.list():
-            for tag in highlight.get("tags") or []:
-                item = entry(tag)
-                item["quote_count"] += 1
-                used.add(tag)
-        for tag in used:
-            item = entries[tag]
-            item["recording_count"] += 1
-            item["recordings"].append(recording.id)
+            for code_id in highlight.get("codes") or []:
+                entry = uses.setdefault(code_id, {"quote_count": 0, "recordings": []})
+                entry["quote_count"] += 1
+                if recording.id not in entry["recordings"]:
+                    entry["recordings"].append(recording.id)
 
-    # Most-established first: a tag on many recordings is the one to reuse.
-    return sorted(
-        entries.values(),
-        key=lambda e: (-e["recording_count"], -e["quote_count"], e["tag"].lower()),
-    )
+    entries = []
+    for coder, code in registry.books.all_text() if registry.books else []:
+        use = uses.get(code["id"], {"quote_count": 0, "recordings": []})
+        entries.append(
+            {
+                **code,
+                "tag": code["name"],
+                "coder": coder,
+                "quote_count": use["quote_count"],
+                "recording_count": len(use["recordings"]),
+                "recordings": use["recordings"],
+            }
+        )
+    # Most-established first: a code on many recordings is the one to reuse.
+    return sorted(entries, key=lambda e: (-e["recording_count"], -e["quote_count"], e["tag"].lower()))
 
 
 def cooccurrence(quotes: list[dict], minimum: int = 1) -> list[dict]:
@@ -336,10 +436,16 @@ class ThemeStore:
     atomically, and fields written by a later version survive a round trip.
     """
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, readonly: bool = False):
         self.path = path
+        #: True when the file exists but could not be read. In a synced study it
+        #: may be another coder's, mid-sync, so it is left alone until written.
+        self.unreadable = False
+        #: Another coder's themes are read, never written: only their own tool
+        #: writes their folder. Laying them out still happens, in memory.
+        self.readonly = readonly
         self._data = self._load()
-        if self._prepare_canvas():
+        if self._prepare_canvas() and not self.unreadable and not readonly:
             self._write()
 
     def _empty(self) -> dict:
@@ -356,11 +462,7 @@ class ThemeStore:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            backup = self.path.with_suffix(self.path.suffix + ".corrupt")
-            try:
-                os.replace(self.path, backup)
-            except OSError:
-                pass
+            self.unreadable = True
             return self._empty()
         if not isinstance(data, dict):
             return self._empty()
@@ -374,6 +476,15 @@ class ThemeStore:
         return data
 
     def _write(self) -> None:
+        if self.readonly:
+            raise PermissionError("another coder's themes are read-only")
+        if self.unreadable:
+            # Only now, about to write over it, is an unreadable file kept aside.
+            try:
+                os.replace(self.path, self.path.with_suffix(self.path.suffix + ".corrupt"))
+            except OSError:
+                pass
+            self.unreadable = False
         self._data["updated_at"] = _now()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         handle = tempfile.NamedTemporaryFile(
@@ -587,6 +698,8 @@ class ThemeStore:
                 }
             )
         if cards:
+            # Cards given with the theme are kept inside it, as a drop would be.
+            self._contain()
             self._sync_refs()
         self._write()
         return theme
@@ -856,6 +969,38 @@ class ThemeStore:
             ]
             theme["refs"] = ordered
 
+    def replace_ref(self, old: str, new: str) -> int:
+        """Point every card for ``old`` at ``new``, e.g. when a code moves to common.
+
+        A theme that already holds ``new`` keeps its one card for it.
+        """
+        changed = 0
+        for card in list(self._data["cards"]):
+            if card.get("ref") != old:
+                continue
+            changed += 1
+            if self._card(new, card.get("theme_id")):
+                self._data["cards"].remove(card)
+            else:
+                card["ref"] = new
+        for theme in self._data["themes"]:
+            renamed = [new if r == old else r for r in theme.get("refs", [])]
+            theme["refs"] = list(dict.fromkeys(renamed))
+        if changed:
+            self._sync_refs()
+            self._write()
+        return changed
+
+    def remove_ref(self, ref: str) -> int:
+        """Take a code out of every theme and off the canvas, e.g. when it is deleted."""
+        cards = [c for c in self._data["cards"] if c.get("ref") != ref]
+        removed = len(self._data["cards"]) - len(cards)
+        if removed:
+            self._data["cards"] = cards
+            self._sync_refs()
+            self._write()
+        return removed
+
     def prune(self, known: set[str]) -> int:
         """Drop references to quotes that no longer exist.
 
@@ -873,3 +1018,87 @@ class ThemeStore:
             self._sync_refs()
             self._write()
         return removed
+
+
+# -- common themes --------------------------------------------------------------
+
+
+def _card_key(card: dict) -> str:
+    return f"{card.get('theme_id') or 'loose'}|{card['ref']}"
+
+
+class CommonThemeStore(ThemeStore):
+    """The agreed themes, which anyone may edit, kept like other common records.
+
+    A theme and each of its cards are separate common records, so two coders
+    arranging the same theme at once each change only their own records and
+    neither overwrites the other. Every change is written to the acting coder's
+    own copy (set ``writer`` before changing anything); the store works out what
+    changed by comparing with what it last read or wrote.
+    """
+
+    THEMES = "themes.json"
+    CARDS = "theme_cards.json"
+
+    def __init__(self, root: Path):
+        from .common import CommonSet
+
+        self.path = Path(root) / "common" / self.THEMES
+        self.unreadable = False
+        self.readonly = False
+        self.writer: str | None = None
+        self._themes = CommonSet(root, self.THEMES)
+        self._cards = CommonSet(root, self.CARDS)
+        self._data = self._load()
+
+    @property
+    def incomplete(self) -> bool:
+        return self._themes.incomplete or self._cards.incomplete
+
+    def sets(self):
+        return (self._themes, self._cards)
+
+    def reload(self) -> None:
+        self._themes.reload()
+        self._cards.reload()
+        self._data = self._load()
+
+    @staticmethod
+    def _clean(record: dict) -> dict:
+        return {k: v for k, v in record.items() if k not in ("updated_at", "updated_by", "deleted")}
+
+    def _load(self) -> dict:
+        themes = [{**self._clean(t), "refs": []} for t in self._themes.list()]
+        ids = {t["id"] for t in themes}
+        cards = [self._clean(c) for c in self._cards.list() if not c.get("theme_id") or c["theme_id"] in ids]
+        for card in cards:
+            card.pop("id", None)
+        self._seen = self._snapshot(themes, cards)
+        data = {"version": SCHEMA_VERSION, "updated_at": _now(), "themes": themes, "cards": cards}
+        self._data = data
+        self._sync_refs()
+        return data
+
+    @staticmethod
+    def _snapshot(themes, cards):
+        return (
+            {t["id"]: {k: v for k, v in t.items() if k != "refs"} for t in themes},
+            {_card_key(c): dict(c) for c in cards},
+        )
+
+    def _write(self) -> None:
+        if not self.writer:
+            raise RuntimeError("common themes are changed on behalf of a coder; set writer first")
+        themes, cards = self._snapshot(self._data["themes"], self._data["cards"])
+        seen_themes, seen_cards = self._seen
+        for theme_id, theme in themes.items():
+            if seen_themes.get(theme_id) != theme:
+                self._themes.put(self.writer, theme)
+        for theme_id in set(seen_themes) - set(themes):
+            self._themes.delete(self.writer, theme_id)
+        for key, card in cards.items():
+            if seen_cards.get(key) != card:
+                self._cards.put(self.writer, {"id": key, **card})
+        for key in set(seen_cards) - set(cards):
+            self._cards.delete(self.writer, key)
+        self._seen = (themes, cards)

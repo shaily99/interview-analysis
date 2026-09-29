@@ -1,7 +1,8 @@
-/* Saved quotes: the selection bar, the sidebar list, and their edits.
+/* Saved quotes: the selection bar, the quote cards in the Text codes pane, and
+ * their edits.
  *
- * Every change writes to disk immediately, so there is no save step and nothing
- * to lose if the tab closes.
+ * Cards sit level with their transcript block and scroll with it. Every change
+ * writes to disk immediately, so there is no save step.
  */
 
 import { api, escapeHtml, formatTime } from "./util.js";
@@ -14,12 +15,78 @@ import {
 } from "./transcript.js";
 import { seekAndPlay } from "./player.js";
 import { mountTagFields } from "./tagfield.js";
+import { coderTag, initialsOf, isCommon, isMine, visibleNow } from "./coder.js";
+import { openMoveDialog, returnToCoders } from "./commondialog.js";
+import { renderStrip } from "./codestrip.js";
 
 export function initHighlights(ctx) {
   renderSwatches(ctx);
   bindQuoteBar(ctx);
   bindList(ctx);
+  bindLevelling(ctx);
   renderList(ctx);
+}
+
+/* --------------------------------------------------- cards beside the text -- */
+
+/* Each quote card sits level with the transcript block its quote starts in, and
+ * the two panes scroll together, so the codes on a passage are read beside it.
+ * Cards that would overlap are pushed down, never reordered. With the transcript
+ * collapsed there is nothing to line up with, and the cards fall back to a list. */
+const CARD_GAP = 6;
+
+function levelQuotes(ctx) {
+  const list = ctx.el.highlightList;
+  const reader = ctx.el.reader;
+  const cards = [...list.querySelectorAll(".quote")];
+  const canLevel = cards.length && reader.offsetParent && list.offsetParent && ctx.chunkEls?.length;
+  list.classList.toggle("quotes-level--on", Boolean(canLevel));
+  if (!canLevel) return;
+
+  const readerTop = reader.getBoundingClientRect().top;
+  const listTop = list.getBoundingClientRect().top;
+  const shift = readerTop - listTop;
+  let floor = 0;
+  for (const card of cards) {
+    const highlight = ctx.highlights.find((h) => h.id === card.dataset.id);
+    const cue = highlight && ctx.el.chunks.querySelector(`[data-cue-id="${highlight.start_cue_id}"]`);
+    const block = cue?.closest(".chunk");
+    const want = block ? block.getBoundingClientRect().top - readerTop + reader.scrollTop + shift : floor;
+    const top = Math.max(want, floor);
+    card.style.top = `${top}px`;
+    floor = top + card.offsetHeight + CARD_GAP;
+  }
+  list.style.setProperty("--level-height", `${Math.max(floor, reader.scrollHeight + shift)}px`);
+  list.scrollTop = reader.scrollTop;
+}
+
+function bindLevelling(ctx) {
+  const list = ctx.el.highlightList;
+  const reader = ctx.el.reader;
+  // The pane you are using leads and the other follows it. Deciding by intent,
+  // not by whichever scrolled last, keeps a smooth scroll of one from being
+  // snapped back by the echo of the other.
+  let leader = "reader";
+  ctx.leadScroll = (who) => (leader = who);
+  for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) {
+    list.addEventListener(type, () => (leader = "list"), { passive: true });
+    reader.addEventListener(type, () => (leader = "reader"), { passive: true });
+  }
+  reader.addEventListener("scroll", () => {
+    if (leader !== "reader" || !list.classList.contains("quotes-level--on")) return;
+    list.scrollTop = reader.scrollTop;
+  });
+  list.addEventListener("scroll", () => {
+    if (leader !== "list" || !list.classList.contains("quotes-level--on")) return;
+    // Instant: the reader scrolls smoothly by default, which would lag behind.
+    reader.scrollTo({ top: list.scrollTop, behavior: "instant" });
+  });
+  ctx.onGeometry = () => levelQuotes(ctx);
+  let pending;
+  list.addEventListener("input", () => {
+    clearTimeout(pending);
+    pending = setTimeout(() => levelQuotes(ctx), 150);
+  });
 }
 
 /* --------------------------------------------------------- selection bar -- */
@@ -189,7 +256,7 @@ export async function save(ctx, { color, focusNote = false } = {}) {
   }
 
   try {
-    const { highlight, known_tags: knownTags } = await api(
+    const { highlight } = await api(
       `/api/recordings/${ctx.recordingId}/highlights`,
       {
         method: "POST",
@@ -205,7 +272,6 @@ export async function save(ctx, { color, focusNote = false } = {}) {
       }
     );
     ctx.highlights.push(highlight);
-    ctx.knownTags = knownTags;
     window.getSelection()?.removeAllRanges();
     hideQuoteBar(ctx);
     // Mark it inline too, so the transcript and the sidebar agree on which quote
@@ -233,32 +299,112 @@ export function copySelection(ctx) {
 
 /* ----------------------------------------------------------------- list -- */
 
+/* Text codes come from each coder's own codebook; the strip and the chips read
+ * them from here, loaded from /api/library/text-codebook. */
+export async function refreshTextCodes(ctx, { render = true } = {}) {
+  const [book, vocabulary] = await Promise.all([
+    api("/api/library/text-codebook"),
+    api("/api/library/vocabulary"),
+  ]);
+  ctx.textCodes = book.codes;
+  ctx.codeColors = book.colors;
+  ctx.vocabulary = vocabulary.tags;
+  ctx.textCodesLoaded = true;
+  if (render) renderList(ctx);
+  else {
+    renderCodeStrip(ctx);
+    levelQuotes(ctx);
+  }
+}
+
+const codeById = (ctx, id) => (ctx.textCodes || []).find((c) => c.id === id);
+const myCodeByName = (ctx, name) =>
+  (ctx.textCodes || []).find((c) => isMine(c) && c.name.toLowerCase() === name.trim().toLowerCase());
+
+/** A code chip that cannot be edited: colour, name, and whose it is. */
+function staticChip(code) {
+  if (!code) return "";
+  return `<span class="chip"><i class="chip__swatch vc--${escapeHtml(code.color)}"></i>${escapeHtml(code.name)}${coderTag(code.coder)}</span>`;
+}
+
+/** The strip alone, so a code edit on one quote does not rebuild every card. */
+function renderCodeStrip(ctx) {
+  const inMode = ctx.highlights.filter(visibleNow);
+  const counts = new Map();
+  for (const highlight of inMode) {
+    for (const id of highlight.codes || []) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  // A filter whose code just left every visible quote would strand the list
+  // showing nothing, with no way back except a chip that is now gone.
+  const stripCodes = (ctx.textCodes || [])
+    .filter((c) => (isMine(c) || isCommon(c) ? true : visibleNow(c) && counts.has(c.id)))
+    .map((c) => ({ ...c, count: counts.get(c.id) || 0, total: c.quote_count }));
+  if (ctx.codeFilter && !stripCodes.some((c) => c.id === ctx.codeFilter)) ctx.codeFilter = null;
+  renderStrip(ctx.el.tagFilters, {
+    codes: stripCodes,
+    filter: ctx.codeFilter,
+    colors: ctx.codeColors || [],
+    noun: "text code",
+    kind: "text",
+    onFilter: (id) => {
+      ctx.codeFilter = id;
+      renderList(ctx);
+    },
+    onAction: (action, code, value) => codebookAction(ctx, action, code, value),
+  });
+  return inMode;
+}
+
 export function renderList(ctx) {
   const list = ctx.el.highlightList;
-  ctx.el.highlightCount.textContent = String(ctx.highlights.length);
+  // Independent mode shows only your own quotes; collaborative shows everyone's.
+  const inMode = renderCodeStrip(ctx);
+  ctx.el.highlightCount.textContent = String(inMode.length);
 
-  // A filter whose last quote just lost the tag would otherwise strand the list
-  // showing nothing, with no way back except clicking a button that is now gone.
-  const counts = tagsInUse(ctx);
-  if (ctx.tagFilter && !counts.has(ctx.tagFilter)) ctx.tagFilter = null;
-
-  const visible = ctx.tagFilter
-    ? ctx.highlights.filter((h) => (h.tags || []).includes(ctx.tagFilter))
-    : ctx.highlights;
-
-  renderTagFilters(ctx, counts);
+  const visible = ctx.codeFilter ? inMode.filter((h) => (h.codes || []).includes(ctx.codeFilter)) : inMode;
 
   if (!visible.length) {
-    list.innerHTML = ctx.highlights.length
-      ? '<p class="empty">No quotes with that tag.</p>'
-      : '<p class="empty">Select text in the transcript to save a quote. Quotes are written to a JSON file next to the recording.</p>';
+    list.innerHTML = inMode.length
+      ? '<p class="empty">No quotes with that text code.</p>'
+      : '<p class="empty">Select text in the transcript to save a quote. Your quotes are saved in your own folder inside the recording.</p>';
+    levelQuotes(ctx);
     return;
   }
 
   const ordered = [...visible].sort((a, b) => a.start_time - b.start_time);
-  list.innerHTML = ordered
-    .map(
-      (highlight) => `
+  list.innerHTML = ordered.map((highlight) => (isMine(highlight) ? ownCard(ctx, highlight) : otherCard(ctx, highlight))).join("");
+
+  // Until the codebook has loaded, a field would show a quote's codes as empty,
+  // and saving from it would erase them.
+  if (!ctx.textCodesLoaded) {
+    levelQuotes(ctx);
+    return;
+  }
+  mountTagFields(list, {
+    noun: "text code",
+    getTags: (id) =>
+      (ctx.highlights.find((h) => h.id === id)?.codes || []).map((cid) => codeById(ctx, cid)?.name).filter(Boolean),
+    // Your own codes, and the common ones: picking a common name codes with your
+    // own same-named code, which is later merged into the common one.
+    getVocabulary: () => {
+      const mine = (ctx.vocabulary || []).filter(isMine);
+      const names = new Set(mine.map((e) => e.tag.toLowerCase()));
+      return [...mine, ...(ctx.vocabulary || []).filter((e) => isCommon(e) && !names.has(e.tag.toLowerCase()))];
+    },
+    decorate: (name) => {
+      const code = myCodeByName(ctx, name);
+      return { before: `<i class="chip__swatch vc--${escapeHtml(code?.color || "slate")}"></i>` };
+    },
+    onCommit: (id, names) => {
+      const highlight = ctx.highlights.find((h) => h.id === id);
+      if (highlight) setCodes(ctx, highlight, names);
+    },
+  });
+  levelQuotes(ctx);
+}
+
+function ownCard(ctx, highlight) {
+  return `
       <article class="quote quote--${highlight.color}" data-id="${highlight.id}">
         <p class="quote__text" data-action="jump">${escapeHtml(highlight.text)}</p>
         <div class="quote__meta">
@@ -279,65 +425,97 @@ export function renderList(ctx) {
         </div>
         <textarea class="quote__note" rows="1" placeholder="Note" data-action="note">${escapeHtml(highlight.note || "")}</textarea>
         <div class="tagfield" data-id="${highlight.id}"></div>
-      </article>`
-    )
-    .join("");
-
-  mountTagFields(list, {
-    getTags: (id) => ctx.highlights.find((h) => h.id === id)?.tags || [],
-    // Completions come from the whole library, so a tag coined in one interview
-    // is offered in every other one.
-    getVocabulary: () => ctx.vocabulary,
-    onCommit: (id, tags) => {
-      const highlight = ctx.highlights.find((h) => h.id === id);
-      if (highlight) patch(ctx, highlight, { tags }, { rerender: false });
-    },
-  });
+      </article>`;
 }
 
-/** Fold a just-used tag into the vocabulary so it completes straight away. */
-function mergeVocabulary(ctx, tags) {
-  for (const tag of tags) {
-    if (!ctx.vocabulary.some((entry) => entry.tag.toLowerCase() === tag.toLowerCase())) {
-      ctx.vocabulary.push({ tag, quote_count: 1, recording_count: 1, recordings: [] });
+/** Another coder's quote in collaborative mode, or a common one: visible, labelled, read-only. */
+function otherCard(ctx, highlight) {
+  const chips = (highlight.codes || []).map((id) => staticChip(codeById(ctx, id))).join("");
+  const common = isCommon(highlight);
+  // A common quote's note is each contributor's own, labelled with who wrote it.
+  const notes = common
+    ? (highlight.notes || []).map((n) => `<p class="quote__note-text"><b>${escapeHtml(initialsOf(n.coder))}</b> ${escapeHtml(n.note)}</p>`).join("")
+    : "";
+  return `
+      <article class="quote quote--${highlight.color} quote--theirs" data-id="${highlight.id}">
+        <p class="quote__text" data-action="jump">${escapeHtml(highlight.text)}</p>
+        <div class="quote__meta">
+          <span class="quote__speaker">${escapeHtml(highlight.speaker || "—")}</span>
+          <time>${formatTime(highlight.start_time)}</time>
+          <span class="quote__by">${common ? `${coderTag("common")} from ${(highlight.contributors || []).map((c) => escapeHtml(initialsOf(c))).join(", ")}` : `by ${coderTag(highlight.coder)}`}</span>
+          <span class="quote__tools">
+            <button class="icon-btn" type="button" data-action="copy" title="Copy quote">⧉</button>
+          </span>
+        </div>
+        ${highlight.note ? `<p class="quote__note-text">${escapeHtml(highlight.note)}</p>` : ""}
+        ${notes}
+        ${chips ? `<div class="chips">${chips}</div>` : ""}
+      </article>`;
+}
+
+/** Save the codes named in a quote's field, adding any new names to your codebook first. */
+async function setCodes(ctx, highlight, names) {
+  try {
+    const ids = [];
+    for (const name of names) {
+      let code = myCodeByName(ctx, name);
+      if (!code) {
+        // A name taken from a common code keeps that code's colour and description.
+        const common = (ctx.textCodes || []).find((c) => isCommon(c) && c.name.toLowerCase() === name.trim().toLowerCase());
+        const body = common ? { name, color: common.color, description: common.description } : { name };
+        const result = await api("/api/library/text-codebook", { method: "POST", body });
+        ctx.textCodes = result.codes;
+        code = result.code;
+      }
+      ids.push(code.id);
     }
+    await patch(ctx, highlight, { codes: ids }, { rerender: false });
+    // Only the strip: rebuilding the cards would take focus out of the field
+    // you are typing in, and the next keys would go to the reader's shortcuts.
+    await refreshTextCodes(ctx, { render: false });
+  } catch (error) {
+    ctx.notify(`Could not save the text codes: ${error.message}`, { kind: "warn" });
+    renderList(ctx);
   }
 }
 
-/** Tags that are actually on a quote right now, with how many carry each.
- *
- * Deliberately not ``knownTags``: that keeps every tag ever typed so it can be
- * offered for autocomplete, but a filter for a tag with nothing behind it is a
- * dead end. History belongs in the input, reality belongs in the filter.
- */
-function tagsInUse(ctx) {
-  const counts = new Map();
-  for (const highlight of ctx.highlights) {
-    for (const tag of highlight.tags || []) {
-      counts.set(tag, (counts.get(tag) || 0) + 1);
+/** The strip's ⋯ menu, applied to your own codebook or to a common code. */
+async function codebookAction(ctx, action, code, value) {
+  const base = `/api/library/text-codebook/${code.id}`;
+  try {
+    if (action === "move" || action === "return") {
+      const done =
+        action === "move"
+          ? await openMoveDialog({ kind: "text", code, common: (ctx.textCodes || []).filter(isCommon) })
+          : await returnToCoders("text", code);
+      if (!done) return;
+      ctx.highlights = (await api(`/api/recordings/${ctx.recordingId}`)).highlights;
+      applyHighlights(ctx);
+      ctx.notify(action === "move" ? `Moved “${code.name}” to common.` : `Returned ✓ ${code.name} to its coders.`);
     }
+    if (action === "rename") await api(base, { method: "PATCH", body: { name: value } });
+    if (action === "describe") await api(base, { method: "PATCH", body: { description: value } });
+    if (action === "color") await api(base, { method: "PATCH", body: { color: value } });
+    if (action === "delete") await api(base, { method: "DELETE" });
+    if (action === "merge") {
+      const result = await api(`${base}/merge`, { method: "POST", body: { into: value } });
+      ctx.highlights = (await api(`/api/recordings/${ctx.recordingId}/highlights`)).highlights;
+      applyHighlights(ctx);
+      ctx.notify(`Merged “${code.name}” (${result.moved} quote${result.moved === 1 ? "" : "s"}).`);
+    }
+    if (action === "delete" && ctx.codeFilter === code.id) ctx.codeFilter = null;
+  } catch (error) {
+    ctx.notify(error.message, { kind: "warn" });
   }
-  return new Map([...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])));
-}
-
-function renderTagFilters(ctx, counts) {
-  if (!counts.size) {
-    ctx.el.tagFilters.innerHTML = "";
-    return;
-  }
-  ctx.el.tagFilters.innerHTML = [...counts.entries()]
-    .map(
-      ([tag, count]) =>
-        `<button class="tag" type="button" data-tag="${escapeHtml(tag)}" aria-pressed="${ctx.tagFilter === tag}">` +
-        `${escapeHtml(tag)}<span class="tag__count">${count}</span></button>`
-    )
-    .join("");
+  window.dispatchEvent(new CustomEvent("commonchange"));
+  await refreshTextCodes(ctx);
 }
 
 /** Bring a newly saved quote into view in the sidebar and mark it. */
 export function revealQuote(ctx, highlightId, { focusNote = false } = {}) {
   const card = ctx.el.highlightList.querySelector(`[data-id="${highlightId}"]`);
   if (!card) return;
+  ctx.leadScroll?.("list");
   card.scrollIntoView({ block: "nearest", behavior: "smooth" });
   card.classList.add("quote--new");
   setTimeout(() => card.classList.remove("quote--new"), 1800);
@@ -347,19 +525,14 @@ export function revealQuote(ctx, highlightId, { focusNote = false } = {}) {
 }
 
 function bindList(ctx) {
-  ctx.el.tagFilters.addEventListener("click", (event) => {
-    const button = event.target.closest(".tag");
-    if (!button) return;
-    ctx.tagFilter = ctx.tagFilter === button.dataset.tag ? null : button.dataset.tag;
-    renderList(ctx);
-  });
-
   ctx.el.highlightList.addEventListener("click", async (event) => {
     const card = event.target.closest(".quote");
     if (!card) return;
     const highlight = ctx.highlights.find((h) => h.id === card.dataset.id);
     if (!highlight) return;
     const action = event.target.closest("[data-action]")?.dataset.action;
+    // Another coder's quote is read-only; only jumping and copying apply.
+    if (!isMine(highlight) && action !== "jump" && action !== "copy") return;
 
     if (action === "jump") {
       jumpToHighlight(ctx, highlight);
@@ -409,8 +582,6 @@ async function patch(ctx, highlight, body, { rerender = true } = {}) {
       { method: "PATCH", body }
     );
     Object.assign(highlight, response.highlight);
-    ctx.knownTags = response.known_tags;
-    mergeVocabulary(ctx, highlight.tags || []);
     applyHighlights(ctx);
     if (rerender) renderList(ctx);
   } catch (error) {

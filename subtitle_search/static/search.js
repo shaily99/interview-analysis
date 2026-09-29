@@ -1,4 +1,8 @@
-/* Quote search. Exact matches first, then close ones. */
+/* Transcript search. Exact matches first, then close ones.
+ *
+ * Matches drop down under the search box, over the panes, and close when one
+ * is picked, on Escape, or on a click anywhere else; focusing the box again
+ * brings the last matches back. */
 
 import { api, debounce, escapeHtml, formatTime } from "./util.js";
 import { flashCue, scrollToChunk } from "./transcript.js";
@@ -7,14 +11,30 @@ import { seekAndPlay } from "./player.js";
 const KIND_LABEL = { exact: "exact", fuzzy: "close", regex: "regex" };
 
 export function initSearch(ctx) {
-  const { searchInput, regexToggle, searchResults, searchCount } = ctx.el;
+  const { searchInput, regexToggle, searchResults, searchCount, searchDrop } = ctx.el;
+
+  const open = () => {
+    if (searchInput.value.trim().length < 2) return;
+    searchDrop.hidden = false;
+    searchInput.setAttribute("aria-expanded", "true");
+  };
+  const close = () => {
+    searchDrop.hidden = true;
+    searchInput.setAttribute("aria-expanded", "false");
+  };
+  ctx.openSearch = open;
+  ctx.closeSearch = close;
+  searchInput.addEventListener("focus", open);
+  document.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest(".topbar__search")) close();
+  });
 
   const run = debounce(async () => {
     const query = searchInput.value.trim();
     if (query.length < 2) {
       searchCount.textContent = "";
-      searchResults.innerHTML =
-        '<p class="empty">Search the transcript to find a quote. Exact matches come first, then close ones.</p>';
+      searchResults.innerHTML = "";
+      close();
       return;
     }
 
@@ -28,6 +48,7 @@ export function initSearch(ctx) {
       searchCount.textContent = "";
       searchResults.innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`;
     }
+    open();
   }, 160);
 
   searchInput.addEventListener("input", run);
@@ -41,6 +62,7 @@ export function initSearch(ctx) {
     if (event.key === "Escape") {
       searchInput.value = "";
       searchInput.blur();
+      close();
       run();
     }
     if (event.key === "Enter") {
@@ -55,6 +77,7 @@ export function initSearch(ctx) {
     searchResults.querySelectorAll(".result--active").forEach((el) => el.classList.remove("result--active"));
     button.classList.add("result--active");
     jumpTo(ctx, button.dataset);
+    close();
   });
 }
 

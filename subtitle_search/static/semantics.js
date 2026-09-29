@@ -3,17 +3,19 @@
  * Map     - every quote placed by what it says. Clusters here are formed by the
  *           language, so they can disagree with your themes; where they do is
  *           either a theme you missed or a distinction you decided not to make.
- *           Draw a loop around a group to turn it into a theme.
- * Graph   - tags pulled together by the quotes they share. The same numbers as
+ *           Dots take the colour of the first theme holding one of the quote's
+ *           codes. Draw a loop around a group to make a theme from its codes.
+ * Graph   - text codes pulled together by the quotes they share. The same numbers as
  *           the Pairs list, arranged so the shape of the codebook is visible:
  *           what clumps, what dangles, what sits on its own.
- * Signals - whether new interviews are still turning up new tags, and which
+ * Signals - whether new interviews are still turning up new text codes, and which
  *           quotes refuse to group with anything.
  *
  * Nothing here files anything. Every grouping is a proposal a person accepts.
  */
 
 import { $, api, escapeHtml, formatTime } from "./util.js";
+import { currentMode } from "./coder.js";
 
 const PALETTE = ["amber", "teal", "rose", "violet", "sage"];
 
@@ -36,7 +38,7 @@ async function ensureSemantics({ force = false } = {}) {
   $("map-note").textContent = neural
     ? "encoding with the language model…"
     : "reading word overlap…";
-  const data = await api(`/api/library/semantics?neural=${neural ? 1 : 0}`);
+  const data = await api(`/api/library/semantics?neural=${neural ? 1 : 0}&mode=${currentMode()}`);
   semantics = { ...data, neural };
   return semantics;
 }
@@ -51,7 +53,10 @@ function colourOf(point, mode) {
     const ids = [...ctx.state.recordings.keys()];
     return PALETTE[ids.indexOf(ctx.state.byRef.get(point.ref)?.recording_id) % PALETTE.length];
   }
-  const theme = ctx.state.themes.findIndex((t) => t.refs.includes(point.ref));
+  // Themes hold codes: a quote takes the colour of the first theme holding any
+  // of its codes.
+  const codes = (ctx.state.byRef.get(point.ref)?.codes || []).map((id) => `text:${id}`);
+  const theme = ctx.state.themes.findIndex((t) => t.refs.some((ref) => codes.includes(ref)));
   return theme < 0 ? "unplaced" : PALETTE[theme % PALETTE.length];
 }
 
@@ -128,7 +133,8 @@ export async function renderMap() {
 function syncSelectionButton() {
   const button = $("map-make-theme");
   button.hidden = selection.size === 0;
-  button.textContent = `Make a theme from these ${selection.size}`;
+  // A theme holds codes, so it takes the codes these quotes carry.
+  button.textContent = `Make a theme from these ${selection.size} quotes' codes`;
 }
 
 function insidePolygon(x, y, polygon) {
@@ -339,7 +345,7 @@ export function renderGraph() {
 
   if (!ctx.state.tags.length) {
     svg.innerHTML = "";
-    $("graph-side").innerHTML = '<p class="empty">No tags yet.</p>';
+    $("graph-side").innerHTML = '<p class="empty">No text codes yet.</p>';
     return;
   }
 
@@ -464,7 +470,7 @@ export async function renderSignals() {
       const [x, y] = at(point, index);
       return `<circle class="sat__dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4"><title>${escapeHtml(
         point.title
-      )}: ${point.total} tags, ${point.new} new</title></circle>
+      )}: ${point.total} text codes, ${point.new} new</title></circle>
       <text class="sat__label" x="${x.toFixed(1)}" y="${height - pad + 16}" text-anchor="middle">${escapeHtml(
         point.title
       )}</text>`;
@@ -473,18 +479,18 @@ export async function renderSignals() {
 
   const stillClimbing = points[points.length - 1].new > 0;
   $("saturation-note").textContent = stillClimbing
-    ? "the last interview still brought new tags"
+    ? "the last interview still brought new text codes"
     : "the last interviews brought nothing new";
 
   host.innerHTML = `
     <svg class="sat" viewBox="0 0 ${width} ${height}" role="img"
-         aria-label="Cumulative distinct tags across interviews">
+         aria-label="Cumulative distinct text codes across interviews">
       <line class="sat__axis" x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"></line>
       ${bars}
       <polyline class="sat__line" points="${line}"></polyline>
       ${dots}
     </svg>
-    <p class="side__note">Bars are tags appearing for the first time in that interview; the
+    <p class="side__note">Bars are text codes appearing for the first time in that interview; the
       line is the running total. A curve still climbing at the last participant is the study
       saying it is not finished. It measures the codebook rather than the world — a flat
       curve can equally mean you stopped noticing.</p>`;
@@ -495,6 +501,11 @@ export async function renderSignals() {
   $("loneliest").innerHTML = lonely.length
     ? `<div class="qgrid">${lonely.map((q) => ctx.quoteCard(q, { draggable: false })).join("")}</div>`
     : '<p class="empty">Not enough quotes to tell yet.</p>';
+}
+
+/** Forget a lasso selection, e.g. when the quotes on screen change with the mode. */
+export function clearSelection() {
+  selection = new Set();
 }
 
 export function invalidateSemantics() {

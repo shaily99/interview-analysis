@@ -7,8 +7,11 @@ all depend on live in one place:
 Writes are atomic. A temp file in the same directory is fsynced and renamed over
 the original, so a crash mid-write leaves the old file rather than half a new one.
 
-An unreadable file is never overwritten. It is moved aside to ``<name>.corrupt``
-and the store starts empty, so whatever was in it is still there to recover.
+An unreadable file is never overwritten. The store starts empty, and only when it
+is about to write does it move the file aside to ``<name>.corrupt``, so whatever
+was in it is still there to recover. Reading alone never moves it: in a synced
+study the file may be another coder's, half-synced, and renaming it would delete
+it from their folder.
 """
 
 from __future__ import annotations
@@ -34,6 +37,8 @@ class JsonStore:
 
     def __init__(self, path: Path):
         self.path = Path(path)
+        #: True when the file exists but could not be read; see _set_aside.
+        self.unreadable = False
         self._data = self._load()
 
     def _empty(self) -> dict:
@@ -48,17 +53,23 @@ class JsonStore:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            backup = self.path.with_suffix(self.path.suffix + ".corrupt")
-            try:
-                os.replace(self.path, backup)
-            except OSError:
-                pass
+            self.unreadable = True
             return self._empty()
         if not isinstance(data, dict):
             return self._empty()
         return self._repair(data)
 
+    def _set_aside(self) -> None:
+        """Before overwriting a file that could not be read, keep it as ``.corrupt``."""
+        if self.unreadable:
+            try:
+                os.replace(self.path, self.path.with_suffix(self.path.suffix + ".corrupt"))
+            except OSError:
+                pass
+            self.unreadable = False
+
     def _write(self) -> None:
+        self._set_aside()
         self._data["updated_at"] = now()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         handle = tempfile.NamedTemporaryFile(

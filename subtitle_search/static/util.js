@@ -25,9 +25,19 @@ export function debounce(fn, ms) {
   };
 }
 
+//: The coder this browser codes as. Every write names them; see coder.js.
+export const CODER_KEY = "subtitle-search:coder";
+
 export async function api(path, options = {}) {
+  const coder = recall(CODER_KEY);
+  // The page's mode rides along, so a write can answer with what the page shows.
+  const mode = recall("subtitle-search:mode");
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(coder ? { "X-Coder": coder } : {}),
+      ...(mode ? { "X-Mode": mode } : {}),
+    },
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });

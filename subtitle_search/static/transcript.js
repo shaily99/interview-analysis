@@ -5,6 +5,7 @@
  * within a span maps back to a point in time.
  */
 
+import { visibleNow } from "./coder.js";
 import { $, escapeHtml, formatTime, lastAtOrBefore } from "./util.js";
 
 const READING_LINE = 0.32; // Where down the viewport "the line you are reading" sits.
@@ -191,6 +192,8 @@ export function cacheGeometry(ctx) {
 function highlightSlices(ctx) {
   const slices = new Map();
   for (const highlight of ctx.highlights) {
+    // Only the quotes the current mode shows are painted into the text.
+    if (!visibleNow(highlight)) continue;
     const first = ctx.cueById.get(highlight.start_cue_id);
     const last = ctx.cueById.get(highlight.end_cue_id);
     if (!first || !last) continue;
@@ -345,6 +348,8 @@ export function chunkIndexAtTime(ctx, seconds) {
 }
 
 export function setCursor(ctx, index, { scroll = false } = {}) {
+  // The transcript is moving itself, so it leads any pane scrolled with it.
+  if (scroll) ctx.leadScroll?.("reader");
   const bounded = Math.max(0, Math.min(index, ctx.chunks.length - 1));
   if (bounded === ctx.cursorIndex && !scroll) return;
 
