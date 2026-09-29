@@ -481,6 +481,9 @@ def apply_speaker_edit(
         raise EditError("a speaker needs a name")
     if ":" in speaker or "\n" in speaker:
         raise EditError("a speaker's name cannot contain a colon")
+    # A known speaker typed in another case is that speaker, spelled as known.
+    known = [e["name"] for e in transcript.roster] + transcript.speakers
+    speaker = next((n for n in known if n.lower() == speaker.lower()), speaker)
 
     part_index = first.part_index
     vtt_path = recording.part_files[part_index].vtt_path
@@ -502,7 +505,7 @@ def apply_speaker_edit(
         content = splice_speaker(content, cue, speaker, style)
 
     entries = read_speakers(content)
-    if not any(entry["name"] == speaker for entry in entries):
+    if not any(entry["name"].lower() == speaker.lower() for entry in entries):
         entries.append({"key": None, "name": speaker})
     content = write_roster(content, entries)
 

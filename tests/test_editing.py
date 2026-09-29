@@ -948,3 +948,12 @@ def test_quotes_in_other_captions_keep_their_speaker(one_voice):
     elsewhere = _quote(one_voice, "c3", 0, 7)
     apply_speaker_edit(one_voice, "c1", "Rafael Ortiz")
     assert elsewhere["speaker"] == "Dana Whitfield"
+
+
+def test_assigning_a_name_in_another_case_does_not_add_a_second_speaker(one_voice):
+    apply_speaker_edit(one_voice, "c1", "Rafael Ortiz")
+    apply_speaker_edit(one_voice, "c3", "rafael ortiz")
+
+    transcript = one_voice.transcript
+    assert [e["name"] for e in transcript.roster] == ["Rafael Ortiz"]
+    assert transcript.cue("c3").speaker == "Rafael Ortiz"

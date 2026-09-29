@@ -550,7 +550,9 @@ Speaker detection is a heuristic. Zoom writes the speaker either as a
 ambiguous, because a sentence like *"So here's my point: I disagreed"* looks
 identical to one. Candidate prefixes are therefore collected across the whole
 file and only promoted to speakers if they read as a proper name or recur, so a
-stray mid-sentence colon cannot invent a speaker.
+stray mid-sentence colon cannot invent a speaker. Names that differ only in case
+(`PILOT3`, `Pilot3`) are one speaker, spelled as on the roster, or else as first
+seen; the file is left as it is.
 
 The app reports what it decided in a banner on first open. To check a folder
 without starting the server:

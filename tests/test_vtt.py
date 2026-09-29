@@ -289,3 +289,30 @@ def test_without_a_roster_joining_is_unchanged():
     """A plain Zoom transcript must read exactly as it did before any of this."""
     transcript = parse_vtt(fixtures.COLON_PREFIX)
     assert [c.cue_ids for c in transcript.chunks] == [["c0", "c1", "c2"], ["c3"], ["c4"]]
+
+
+CASES_DIFFER = (
+    "WEBVTT\n\n"
+    "1\n00:00:01.000 --> 00:00:02.000\nInterviewer: What did you think?\n\n"
+    "2\n00:00:02.000 --> 00:00:03.000\nPILOT3: It was funny.\n\n"
+    "3\n00:00:03.000 --> 00:00:04.000\nPilot3: Like the kalimba.\n\n"
+    "4\n00:00:04.000 --> 00:00:05.000\npilot3: Really odd.\n\n"
+    "5\n00:00:05.000 --> 00:00:06.000\nInterviewer: Why?\n"
+)
+
+
+def test_names_differing_only_in_case_are_one_speaker():
+    transcript = parse_vtt(CASES_DIFFER)
+
+    assert transcript.speakers == ["Interviewer", "PILOT3"]
+    assert [c.speaker for c in transcript.cues[1:4]] == ["PILOT3"] * 3
+    assert [c.speaker for c in transcript.chunks] == ["Interviewer", "PILOT3", "Interviewer"]
+
+
+def test_a_roster_name_matches_its_other_spellings_and_is_the_one_shown():
+    transcript = parse_vtt(CASES_DIFFER.replace("WEBVTT\n\n", "WEBVTT\n\nNOTE speakers: 1=Pilot3, 2=Interviewer\n\n", 1))
+
+    assert transcript.speakers == ["Interviewer", "Pilot3"]
+    assert [c.speaker for c in transcript.cues[1:4]] == ["Pilot3"] * 3
+    assert transcript.cues[1].text == "It was funny."
+    assert [c.speaker for c in transcript.chunks] == ["Interviewer", "Pilot3", "Interviewer"]

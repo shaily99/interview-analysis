@@ -8,7 +8,8 @@ unambiguous. The colon form is not -- on a single line, a sentence like
 So speaker detection is a whole-file decision, not a per-line guess: candidate
 prefixes are collected across the entire transcript first, and a candidate is
 only promoted to a speaker if it either looks like a proper name or recurs.
-See ``_accept_speakers``.
+See ``_accept_speakers``. Names that differ only in case are one speaker
+(``unify_speakers``).
 
 Each cue also records where its payload sits in the source file, and the exact
 prefix and suffix that were stripped from it. That is what lets a correction be
@@ -21,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .models import Chunk, Cue, Part, Transcript
@@ -274,12 +275,17 @@ def _accept_speakers(counts: dict[str, int], roster: set[str] | None = None) -> 
     a clean two-word name is what keeps a stray mid-sentence colon from inventing
     a speaker: an accidental prefix would have to appear verbatim twice.
     """
-    roster = roster or set()
-    accepted = set()
+    roster = {name.lower() for name in roster or ()}
+    # Spellings that differ only in case are one speaker, counted together.
+    totals: dict[str, int] = {}
     for prefix, count in counts.items():
+        totals[prefix.lower()] = totals.get(prefix.lower(), 0) + count
+    accepted = set()
+    for prefix in counts:
+        count = totals[prefix.lower()]
         # An assigned name is not a guess, so the heuristics do not get a vote:
         # "Interviewer" on a single line would otherwise fail every test below.
-        if prefix in roster:
+        if prefix.lower() in roster:
             accepted.add(prefix)
             continue
         if not is_plausible_speaker_prefix(prefix):
@@ -409,6 +415,19 @@ def parse_cues(content: str) -> tuple[list[Cue], str]:
     return cues, method
 
 
+def unify_speakers(cues: list[Cue], roster: list[str]) -> list[Cue]:
+    """Give every spelling of a speaker that differs only in case one name.
+
+    The name is the roster's spelling when the speaker is on it, otherwise the
+    first spelling in the transcript. The file itself is left as it is.
+    """
+    names = {name.lower(): name for name in reversed(roster)}
+    for cue in cues:
+        if cue.speaker:
+            names.setdefault(cue.speaker.lower(), cue.speaker)
+    return [replace(c, speaker=names[c.speaker.lower()]) if c.speaker else c for c in cues]
+
+
 def build_chunks(
     cues: list[Cue], speaker_count: int, assigned: set[str] | None = None
 ) -> list[Chunk]:
@@ -490,11 +509,12 @@ def build_chunks(
 
 def parse_vtt(content: str, source_name: str = "transcript.vtt") -> Transcript:
     cues, method = parse_cues(content)
+    roster = read_speakers(content)
+    cues = unify_speakers(cues, [e["name"] for e in roster])
     speakers: list[str] = []
     for cue in cues:
         if cue.speaker and cue.speaker not in speakers:
             speakers.append(cue.speaker)
-    roster = read_speakers(content)
     chunks = build_chunks(cues, len(speakers), {e['name'] for e in roster})
     digest = hashlib.sha256(content.encode("utf-8", "replace")).hexdigest()
     return Transcript(
@@ -523,14 +543,15 @@ def assemble_session(specs: list[dict], parts: list[Part], source_name: str) -> 
         for cue in spec["cues"]:
             combined.append(cue.shifted(f"c{len(combined)}", len(combined), offset, part_index))
 
+    roster = assign_keys(
+        list({e['name'].lower(): e for spec in specs for e in spec.get('roster', [])}.values())
+    )
+    combined = unify_speakers(combined, [e["name"] for e in roster])
     speakers: list[str] = []
     for cue in combined:
         if cue.speaker and cue.speaker not in speakers:
             speakers.append(cue.speaker)
 
-    roster = assign_keys(
-        list({e['name']: e for spec in specs for e in spec.get('roster', [])}.values())
-    )
     chunks = build_chunks(combined, len(speakers), {e['name'] for e in roster})
     digest = session_digest([spec["sha256"] for spec in specs])
     methods = {spec["method"] for spec in specs}
