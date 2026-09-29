@@ -815,21 +815,23 @@ def test_anyone_may_edit_return_and_read_the_history_of_a_common_code(client):
     assert other.post(f"/api/library/video-codebook/{common_id}/return").status_code == 200
 
     history = http.get(f"/api/library/video-codebook/{common_id}/history").json()["entries"]
-    assert [e["action"] for e in history] == ["returned", "moved"]
+    assert [e["action"] for e in history] == ["returned", "edited", "moved"]
     # Test Coder's span waits for them; Refresh claims it.
     assert [s["coder"] for s in http.get(f"/api/recordings/{rid}/video-codes").json()["spans"]] == []
     http.post("/api/refresh")
     assert [s["coder"] for s in http.get(f"/api/recordings/{rid}/video-codes").json()["spans"]] == [http.headers["X-Coder"]]
 
 
-def test_refresh_pushes_and_the_pending_count_falls_to_zero(client, folder):
+def test_refresh_pushes_and_updates_the_last_synced_time(client, folder):
     http, _ = client
     code = http.post("/api/library/text-codebook", json={"name": "trust"}).json()["code"]
     http.post(f"/api/library/text-codebook/{code['id']}/move", json={"final": True})
 
-    assert http.get("/api/common/status").json()["pending"] > 0
+    before = http.get("/api/common/status").json()
+    assert "pending" not in before
     http.post("/api/refresh")
-    assert http.get("/api/common/status").json()["pending"] == 0
+    after = http.get("/api/common/status").json()
+    assert after["synced_at"] > before["synced_at"]
     assert (folder / "common" / "text_codebook.json").is_file()
 
 
@@ -862,3 +864,19 @@ def test_the_reader_is_three_panes_and_the_coding_view_has_code_rows(client):
         assert marker in reader
     assert http.get("/static/layout.js").status_code == 200
     assert 'id="vc-tiers"' in http.get("/code").text
+
+
+def test_similar_quotes_follow_the_mode(client):
+    http, rid = client
+    other, _ = as_coder(http, "Rachel K.", "RK")
+    mine = http.post("/api/library/text-codebook", json={"name": "trust"}).json()["code"]
+    theirs = other.post("/api/library/text-codebook", json={"name": "trust"}).json()["code"]
+    quote = http.post(f"/api/recordings/{rid}/highlights", json={**QUOTE, "codes": [mine["id"]]}).json()["highlight"]
+    other.post(f"/api/recordings/{rid}/highlights", json={**QUOTE, "codes": [theirs["id"]]})
+
+    ref = f"{rid}:{quote['id']}"
+    alone = http.get("/api/library/similar", params={"ref": ref, "mode": "independent"}).json()["similar"]
+    together = http.get("/api/library/similar", params={"ref": ref, "mode": "collaborative"}).json()["similar"]
+
+    assert alone == []
+    assert len(together) == 1

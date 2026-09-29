@@ -79,3 +79,9 @@ def test_folders_without_a_coder_file_are_skipped(tmp_path, coders):
     coders.create("Shaily Bhatt", "SB")
 
     assert [c["name"] for c in CoderDirectory(tmp_path).list()] == ["Shaily Bhatt"]
+
+
+def test_a_new_coder_given_only_a_name_gets_unique_initials(coders):
+    coders.create("Shaily Bhatt", "SB")
+
+    assert coders.create("Sam Brown", None)["initials"] == "SBr"

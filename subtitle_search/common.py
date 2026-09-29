@@ -119,14 +119,6 @@ class CommonSet:
     def list(self) -> list[dict]:
         return [r for r in self._merged.values() if not r.get("deleted")]
 
-    def pending(self, coder: str) -> int:
-        """How many of this coder's changes the shared file does not have yet."""
-        own = self._own.get(coder)
-        if own is None:
-            return 0
-        shared = self._shared._data["records"]
-        return sum(1 for rid, r in own._data["records"].items() if _newer(shared.get(rid), r))
-
     def conflict_copies(self) -> list[str]:
         """Copies of the shared file a sync client made when two writes crossed."""
         folder = self.shared_path.parent
@@ -524,17 +516,23 @@ def move_code(registry, kind: str, coder: str, code_id: str, *, final: bool, des
             summary["recordings"] += 1
     if dry_run:
         for recording, _, items in plans:
+            # What the real move has combined into by each item: the target's applications, then the coder's earlier items.
+            if kind == "text":
+                seen = {_anchors(q) for q in recording.common_quotes.list() if target and target["id"] in q["codes"]}
+            else:
+                seen = [(s["start"], s["end"]) for s in recording.common_spans.list() if target and s["code_id"] == target["id"]]
             for item in items:
                 summary["moved"] += 1
                 if kind == "text":
                     summary["quotes_deleted"] += int(len(item["codes"]) == 1)
-                    place = recording.common_quotes.find(item)
-                    summary["duplicates"] += int(bool(target and place and any(
-                        c["code_id"] == target["id"] for c in _live(recording.common_quotes.codes, "quote", place["id"]))))
+                    duplicate = _anchors(item) in seen
+                    seen.add(_anchors(item))
                 else:
-                    summary["duplicates"] += int(bool(target and any(
-                        s["code_id"] == target["id"] and abs(s["start"] - item["start"]) <= SPAN_TOLERANCE
-                        and abs(s["end"] - item["end"]) <= SPAN_TOLERANCE for s in recording.common_spans.list())))
+                    duplicate = any(abs(start - item["start"]) <= SPAN_TOLERANCE and abs(end - item["end"]) <= SPAN_TOLERANCE
+                                    for start, end in seen)
+                    if not duplicate:  # a combined span keeps its first ends
+                        seen.append((item["start"], item["end"]))
+                summary["duplicates"] += int(duplicate)
         return summary
 
     # The common code first, then the common applications, then the coder's own files.

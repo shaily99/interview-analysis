@@ -60,19 +60,28 @@ async function loadCodes() {
   await loadPage();
 }
 
+//: Counts page loads, so replies for a code already clicked past are dropped.
+let pageLoads = 0;
+
 async function loadPage() {
+  const load = ++pageLoads;
   state.selected = new Set();
   state.applications = [];
   remember();
   state.history = [];
   state.themes = [];
   if (current()) {
-    state.applications = (await api(`/api/library/${state.kind}-codebook/${state.codeId}/applications`)).applications;
+    const base = `/api/library/${state.kind}-codebook/${state.codeId}`;
     const ref = `${state.kind}:${state.codeId}`;
-    state.themes = (await api(`/api/library/themes?mode=${currentMode()}`)).themes.filter((t) => (t.refs || []).includes(ref));
-    if (isCommon(current())) {
-      state.history = (await api(`/api/library/${state.kind}-codebook/${state.codeId}/history`)).entries;
-    }
+    const [applications, themes, history] = await Promise.all([
+      api(`${base}/applications`),
+      api(`/api/library/themes?mode=${currentMode()}`),
+      isCommon(current()) ? api(`${base}/history`) : { entries: [] },
+    ]);
+    if (load !== pageLoads) return;
+    state.applications = applications.applications;
+    state.themes = themes.themes.filter((t) => (t.refs || []).includes(ref));
+    state.history = history.entries;
   }
   renderPage();
 }
@@ -185,7 +194,13 @@ function renderPage() {
   if (location.hash === "#history") el.page.querySelector("#history")?.scrollIntoView();
 }
 
-const HISTORY_WORDS = { moved: "moved it to common", returned: "returned it to its coders" };
+const HISTORY_WORDS = {
+  moved: "moved it to common",
+  returned: "returned it to its coders",
+  edited: "edited it",
+  deleted: "deleted it",
+  removed: "removed some of its uses",
+};
 
 function historyPanel() {
   const rows = state.history
@@ -193,6 +208,9 @@ function historyPanel() {
       const what = HISTORY_WORDS[e.action] || e.action;
       const detail = e.action === "moved"
         ? `${e.moved} ${state.kind === "text" ? "quote" : "span"}${e.moved === 1 ? "" : "s"}${e.duplicates ? `, ${e.duplicates} combined` : ""}${e.from && e.from !== e.name ? `, from “${esc(e.from)}”` : ""}`
+        : e.action === "edited"
+        ? `${(e.changes || []).map((f) => (f === "color" ? "colour" : f)).join(", ")}${e.from ? `, from “${esc(e.from)}”` : ""}`
+        : e.removed != null ? `${e.removed} removed`
         : e.returned != null ? `${e.returned} returned` : "";
       return `<li><time>${esc(new Date(e.at).toLocaleString())}</time> ${coderTag(e.coder)} ${esc(nameOf(e.coder))} ${what}${detail ? ` <span class="cbook__speaker">${detail}</span>` : ""}</li>`;
     })

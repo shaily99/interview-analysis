@@ -1485,8 +1485,10 @@ function setGridView(on) {
  * the shape of the whole study at once.
  */
 async function rollAll() {
-  const collapse = ctx.state.themes.some((theme) => !theme.collapsed);
-  const changing = ctx.state.themes.filter((theme) => Boolean(theme.collapsed) !== collapse);
+  // Only your own themes: rolling up a common theme would change it for everyone.
+  const mine = ctx.state.themes.filter(isMine);
+  const collapse = mine.some((theme) => !theme.collapsed);
+  const changing = mine.filter((theme) => Boolean(theme.collapsed) !== collapse);
   if (!changing.length) return;
   try {
     await Promise.all(

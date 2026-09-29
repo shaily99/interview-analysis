@@ -11,7 +11,6 @@ from subtitle_search.library import (
     AREA_PAD,
     CARD_H,
     CARD_W,
-    THEMES_FILENAME,
     ThemeStore,
     all_quotes,
     cooccurrence,
@@ -343,17 +342,17 @@ def test_themes_are_not_pruned_while_a_codebook_cannot_be_read(tmp_path):
 
 
 def test_themes_survive_a_reload(tmp_path, library):
-    store = ThemeStore(library / THEMES_FILENAME)
+    store = ThemeStore(library / "themes.json")
     theme = store.create("Kept")
     store.assign("rec:q1", theme["id"])
 
-    reopened = ThemeStore(library / THEMES_FILENAME)
+    reopened = ThemeStore(library / "themes.json")
     assert [t["title"] for t in reopened.list()] == ["Kept"]
     assert reopened.placed_refs() == {"rec:q1"}
 
 
 def test_unknown_fields_in_the_themes_file_survive(tmp_path):
-    path = tmp_path / THEMES_FILENAME
+    path = tmp_path / "themes.json"
     path.write_text(
         json.dumps(
             {
@@ -426,7 +425,7 @@ def test_a_themes_file_from_before_the_canvas_is_laid_out_on_it(tmp_path, librar
     registry.add_library(library)
     refs = [q["ref"] for q in all_quotes(registry)]
 
-    path = library / THEMES_FILENAME
+    path = library / "themes.json"
     path.write_text(
         json.dumps(
             {
@@ -857,7 +856,7 @@ def test_a_card_left_over_an_areas_title_is_pulled_off_it(tmp_path):
     Dragging and resizing both clamp, so this is for what they cannot reach: a
     hand-edited file, or a position from a version that clamped differently.
     """
-    path = tmp_path / THEMES_FILENAME
+    path = tmp_path / "themes.json"
     path.write_text(
         json.dumps(
             {
@@ -935,12 +934,12 @@ def test_canvas_calls_missing_what_they_act_on_are_400s(client):
 
 
 def test_the_canvas_survives_a_reload(tmp_path, library):
-    store = ThemeStore(library / THEMES_FILENAME)
+    store = ThemeStore(library / "themes.json")
     theme = store.create("Kept", box={"x": 700, "y": 800})
     store.place("rec:q1", theme["id"], 40, 120)
     store.place("rec:q1", None, 2000, 300)
 
-    reopened = ThemeStore(library / THEMES_FILENAME)
+    reopened = ThemeStore(library / "themes.json")
     kept = reopened.list()[0]
     assert (kept["x"], kept["y"]) == (700.0, 800.0)
     assert kept["refs"] == ["rec:q1"]
@@ -1005,17 +1004,17 @@ def test_a_quote_can_still_be_dropped_on_a_rolled_up_area(client):
 
 
 def test_being_rolled_up_survives_a_reload(tmp_path, library):
-    store = ThemeStore(library / THEMES_FILENAME)
+    store = ThemeStore(library / "themes.json")
     theme = store.create("Kept")
     store.update(theme["id"], {"collapsed": True})
 
-    reopened = ThemeStore(library / THEMES_FILENAME).list()[0]
+    reopened = ThemeStore(library / "themes.json").list()[0]
     assert reopened["collapsed"] is True
 
 
 def test_a_themes_file_from_before_rolling_up_reads_as_open(tmp_path):
     """Absent is open. A theme nobody has closed is not closed."""
-    path = tmp_path / THEMES_FILENAME
+    path = tmp_path / "themes.json"
     path.write_text(
         json.dumps(
             {
@@ -1036,7 +1035,7 @@ def test_a_themes_file_from_before_rolling_up_reads_as_open(tmp_path):
 
 def test_a_file_from_a_later_version_is_not_downgraded(tmp_path):
     """Unknown fields survive, and so does the claim about which version wrote it."""
-    path = tmp_path / THEMES_FILENAME
+    path = tmp_path / "themes.json"
     path.write_text(
         json.dumps(
             {
@@ -1146,3 +1145,16 @@ def test_one_unreadable_transcript_does_not_leave_refresh_half_done(tmp_path):
     updated = later.store.update(CODER, "q2", {"codes": [fresh["id"]]})
     assert updated["codes"] == [fresh["id"]]
     assert any(name == "P01" for name, _ in registry.failures)
+
+
+def test_a_code_cards_quotes_are_ordered_by_speaker_then_time(tmp_path):
+    root = tmp_path / "study"
+    make_recording(root, "P01", [{**quote(1, ["trust"]), "speaker": "Zed"}])
+    make_recording(root, "P02", [{**quote(2, ["trust"]), "speaker": "Amy"}, {**quote(1, ["trust"]), "id": "q9", "speaker": "Amy"}])
+    registry = RecordingRegistry()
+    registry.add_library(root)
+    api = TestClient(create_app(registry), headers={"X-Coder": CODER})
+
+    [trust] = [c for c in api.get("/api/library/codes").json()["codes"] if c["name"] == "trust"]
+
+    assert [(a["speaker"], a["start_time"]) for a in trust["applications"]] == [("Amy", 8.0), ("Amy", 9.0), ("Zed", 8.0)]

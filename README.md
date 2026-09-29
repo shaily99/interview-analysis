@@ -508,15 +508,14 @@ span can cross an interruption and correcting a caption never moves one.
 
 ## Coders, modes and common codes
 
-- **Login.** On first open, pick your name from the coders in the study, or add
-  yourself with a name and initials. Initials must be unique. There is no
-  password. Change either from the badge in the header.
+- **Login.** On first open, pick your name or type a new one; initials are made
+  from it. There is no password. **Switch** in the header returns to this screen.
 - **Modes.** The header's switch applies to every page. *Independent* shows your
   work and common codes. *Collaborative* adds everyone else's, labelled with
   initials and read-only.
 - **Refresh.** ↻ Refresh reads what collaborators have synced, pushes your common
   changes to the shared files, and collects items returned to you. The header
-  shows changes not yet pushed and warns about sync conflict copies.
+  shows when the folder was last read and warns about sync conflict copies.
 - **Codebook page** (`/codebook`). One codebook at a time, list beside the code
   page: description, the themes holding the code, and every quote or span that
   carries it, with checkboxes to remove them in bulk.
@@ -529,7 +528,8 @@ span can cross an interruption and correcting a caption never moves one.
   name; move it to common later to merge.
 - **Return to coders** (⋯ menu on a common code). Each contributor gets their
   quotes or spans back under their own code with the common code's name and
-  description. Common codes keep a History.
+  description. Common codes keep a History of moves, returns, edits, deletions
+  and removals.
 - **Themes** follow the same modes. [Common themes](#themes-analysis-across-recordings)
   hold only common codes; a theme can be moved to common once all its codes are.
 - Files from before coders (`session.highlights.json`, `session.video_codes.json`,
@@ -734,14 +734,14 @@ the analysis.
 - **New area** makes a theme in the middle of the view.
 - The **tray** on the left lists codes not yet on the canvas. Drag one onto the
   plane. A code card shows name, colour, ✓ or initials, and count; ▶ marks a
-  video code. Open a card to read its quotes and spans; **↗** opens each in the
-  reader.
+  video code. Open a card to read its quotes and spans, by speaker then time;
+  **↗** opens each in the reader.
 - Drag an area **by the strip across the top of its title bar** and its cards
   move with it.
 - **Resize** from the bottom-right corner; cards outside the new box are pulled
   back inside.
 - **▾** rolls an area up to its title, note and count. **Roll up all** does
-  every area.
+  every one of your own areas.
 - **⊞ tidy** packs an area's cards alphabetically and saves the layout.
 - Drag a card **back to the tray** to remove that card, or onto **bare canvas**
   to park it outside any theme.

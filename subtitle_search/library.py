@@ -28,7 +28,6 @@ from pathlib import Path
 
 from .common import COMMON
 
-THEMES_FILENAME = "library.themes.json"
 SCHEMA_VERSION = 2
 
 #: Where a quote that has not been sorted anywhere yet belongs.
@@ -277,7 +276,8 @@ def code_items(registry, mode: str | None = None, coder: str | None = None) -> l
             if mode == "independent" and owner not in (coder, COMMON):
                 continue
             ref = f"{kind}:{code['id']}"
-            applications = sorted(uses.get(ref, []), key=lambda a: (a["recording_title"], a["start_time"]))
+            # By speaker, then time; uncredited quotes and video spans last.
+            applications = sorted(uses.get(ref, []), key=lambda a: (a["speaker"] is None, (a["speaker"] or "").lower(), a["start_time"], a["recording_title"]))
             items.append({
                 "ref": ref, "kind": kind, "id": code["id"], "name": code["name"],
                 "text": code_label(code["name"], owner, mode, initials), "color": code.get("color"),

@@ -53,7 +53,7 @@ function choose(coder) {
 
 /* -------------------------------------------------------------- login -- */
 
-function openLogin({ editing = false } = {}) {
+function openLogin() {
   return new Promise((resolve) => {
     document.getElementById("coder-login")?.remove();
     const overlay = document.createElement("div");
@@ -64,112 +64,61 @@ function openLogin({ editing = false } = {}) {
     overlay.setAttribute("aria-labelledby", "login-title");
     document.body.appendChild(overlay);
 
-    const me = state.me;
-    let picked = editing ? "edit" : state.coders.length ? state.coders[0].id : "new";
+    const rows = state.coders
+      .map(
+        (c) => `<label class="login__row"><input type="radio" name="who" value="${c.id}">
+           <span class="login__name">${escapeHtml(c.name)}</span><span class="login__initials">${escapeHtml(c.initials)}</span></label>`
+      )
+      .join("");
+    overlay.innerHTML = `
+      <form class="login__card" novalidate>
+        <h2 id="login-title" class="login__title">Who is coding?</h2>
+        <div class="login__list">${rows}
+          <label class="login__row"><input type="radio" name="who" value="new"><span class="login__name">New name…</span></label>
+        </div>
+        <div class="login__fields" hidden><label>Name <input id="login-name" type="text" autocomplete="name"></label></div>
+        <p class="login__error" id="login-error" role="alert" hidden></p>
+        <div class="login__actions">
+          ${state.me ? `<button class="btn" type="button" data-cancel>Cancel</button>` : ""}
+          <button class="btn btn--primary" type="submit">Start coding</button>
+        </div>
+      </form>`;
 
-    const draw = () => {
-      const rows = editing
-        ? ""
-        : state.coders
-            .map(
-              (c) => `<label class="login__row"><input type="radio" name="who" value="${c.id}" ${picked === c.id ? "checked" : ""}>
-                 <span class="login__name">${escapeHtml(c.name)}</span><span class="login__initials">${escapeHtml(c.initials)}</span></label>`
-            )
-            .join("");
-      const showFields = editing || picked === "new";
-      overlay.innerHTML = `
-        <form class="login__card" novalidate>
-          <h2 id="login-title" class="login__title">${editing ? "Your name and initials" : "Who is coding?"}</h2>
-          ${editing ? "" : `<p class="login__lead">Your quotes and codes are labelled with this. Everyone in the study folder can see who made what.</p>`}
-          <div class="login__list">${rows}
-            ${editing ? "" : `<label class="login__row"><input type="radio" name="who" value="new" ${picked === "new" ? "checked" : ""}><span class="login__name">New coder…</span></label>`}
-          </div>
-          <div class="login__fields" ${showFields ? "" : "hidden"}>
-            <label>Name <input id="login-name" type="text" autocomplete="name" value="${escapeHtml(editing ? me.name : "")}"></label>
-            <label>Initials <input id="login-initials" type="text" maxlength="6" value="${escapeHtml(editing ? me.initials : "")}"></label>
-            <p class="login__hint" id="login-hint">Shown on your codes, like <b>SB</b>.</p>
-          </div>
-          <p class="login__error" id="login-error" role="alert" hidden></p>
-          <div class="login__actions">
-            ${editing || state.me ? `<button class="btn" type="button" data-cancel>Cancel</button>` : ""}
-            <button class="btn btn--primary" type="submit">${editing ? "Save" : "Start coding"}</button>
-          </div>
-        </form>`;
-      bind();
+    const form = overlay.querySelector("form");
+    const name = $("login-name");
+    const picked = () => form.elements.who.value;
+    const sync = () => {
+      overlay.querySelector(".login__fields").hidden = picked() !== "new";
+      form.querySelector('[type="submit"]').disabled = !picked() || (picked() === "new" && !name.value.trim());
     };
+    const first = state.me?.id || state.coders[0]?.id || "new";
+    form.querySelector(`[name="who"][value="${first}"]`).checked = true;
+    form.addEventListener("change", sync);
+    name.addEventListener("input", sync);
+    sync();
 
-    const clash = (initials) =>
-      state.coders.find((c) => c.initials.toLowerCase() === initials.toLowerCase() && (!editing || c.id !== me.id));
-
-    const check = () => {
-      const hint = $("login-hint");
-      const initials = $("login-initials")?.value.trim() || "";
-      const other = initials && clash(initials);
-      const submit = overlay.querySelector('[type="submit"]');
-      if (other) {
-        hint.innerHTML = `⚠ ${escapeHtml(other.name)} already uses <b>${escapeHtml(other.initials)}</b>. Try a longer form.`;
-        submit.disabled = true;
-      } else {
-        hint.innerHTML = "Shown on your codes, like <b>SB</b>.";
-        submit.disabled = (picked === "new" || editing) && (!initials || !$("login-name").value.trim());
-      }
-    };
-
-    let initialsTouched = editing;
-    const bind = () => {
-      const name = $("login-name");
-      const initials = $("login-initials");
-      overlay.querySelectorAll('[name="who"]').forEach((radio) =>
-        radio.addEventListener("change", () => {
-          picked = radio.value;
-          draw();
-          if (picked === "new") $("login-name").focus();
-        })
-      );
-      if (name) {
-        name.addEventListener("input", async () => {
-          if (!initialsTouched) {
-            const params = new URLSearchParams({ name: name.value, ...(editing ? { coder: me.id } : {}) });
-            initials.value = (await api(`/api/coders/suggest?${params}`)).initials;
-          }
-          check();
-        });
-        initials.addEventListener("input", () => {
-          initialsTouched = true;
-          check();
-        });
-        check();
-      }
-      overlay.querySelector("[data-cancel]")?.addEventListener("click", () => {
+    overlay.querySelector("[data-cancel]")?.addEventListener("click", () => {
+      overlay.remove();
+      resolve(state.me);
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const coder = picked() === "new"
+          ? (await api("/api/coders", { method: "POST", body: { name: name.value } })).coder
+          : state.coders.find((c) => c.id === picked());
+        await loadCoders();
+        choose(state.coders.find((c) => c.id === coder.id) || coder);
         overlay.remove();
         resolve(state.me);
-      });
-      overlay.querySelector("form").addEventListener("submit", async (event) => {
-        event.preventDefault();
+        window.dispatchEvent(new CustomEvent("coderchange"));
+      } catch (err) {
         const error = $("login-error");
-        try {
-          let coder;
-          if (editing) {
-            coder = (await api(`/api/coders/${me.id}`, { method: "PATCH", body: { name: name.value, initials: initials.value } })).coder;
-          } else if (picked === "new") {
-            coder = (await api("/api/coders", { method: "POST", body: { name: name.value, initials: initials.value } })).coder;
-          } else {
-            coder = state.coders.find((c) => c.id === picked);
-          }
-          await loadCoders();
-          choose(state.coders.find((c) => c.id === coder.id) || coder);
-          overlay.remove();
-          resolve(state.me);
-          window.dispatchEvent(new CustomEvent("coderchange"));
-        } catch (err) {
-          error.textContent = err.message;
-          error.hidden = false;
-        }
-      });
-    };
-
-    draw();
-    overlay.querySelector('input:checked, input[type="text"]')?.focus();
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    });
+    (first === "new" ? name : form.querySelector("input:checked")).focus();
   });
 }
 
@@ -194,13 +143,8 @@ export function mountCoderControls(host, { withMode = true, onRefresh } = {}) {
       : "") +
     `<span class="coderbar__pending" id="common-pending" hidden></span>
      <button class="btn" type="button" id="refresh-btn" title="Read what collaborators have synced into the folder, and push your common changes">↻ Refresh</button>
-     <span class="coderbar__who">
-       <button class="coderbar__badge" type="button" id="coder-badge" aria-haspopup="menu" aria-expanded="false"></button>
-       <span class="coderbar__menu" id="coder-menu" role="menu" hidden>
-         <button type="button" role="menuitem" data-coder="edit">Change name or initials…</button>
-         <button type="button" role="menuitem" data-coder="switch">Code as someone else…</button>
-       </span>
-     </span>`;
+     <span class="coderbar__badge" id="coder-badge"></span>
+     <button class="btn" type="button" id="coder-switch">Switch</button>`;
   host.insertBefore(bar, host.querySelector("#theme-toggle"));
 
   const syncMode = () =>
@@ -232,24 +176,7 @@ export function mountCoderControls(host, { withMode = true, onRefresh } = {}) {
     }
   });
 
-  const badge = $("coder-badge");
-  const menu = $("coder-menu");
-  badge.addEventListener("click", () => {
-    menu.hidden = !menu.hidden;
-    badge.setAttribute("aria-expanded", String(!menu.hidden));
-  });
-  document.addEventListener("click", (event) => {
-    if (!event.target.closest(".coderbar__who")) {
-      menu.hidden = true;
-      badge.setAttribute("aria-expanded", "false");
-    }
-  });
-  menu.addEventListener("click", async (event) => {
-    const action = event.target.closest("[data-coder]")?.dataset.coder;
-    if (!action) return;
-    menu.hidden = true;
-    await openLogin({ editing: action === "edit" });
-  });
+  $("coder-switch").addEventListener("click", () => openLogin());
   syncBadge();
   refreshPending();
   window.addEventListener("commonchange", refreshPending);
@@ -277,20 +204,20 @@ function showStatus(message) {
   host.textContent = message;
 }
 
-/** Show how many of your common changes the shared files lack, and any sync conflicts. */
+/** Show when the folder was last read, and any sync conflicts. */
 export async function refreshPending() {
   const host = $("common-pending");
   if (!host || !state.me) return;
   try {
     const status = await api("/api/common/status");
-    const parts = [];
-    if (status.pending) parts.push(`${status.pending} change${status.pending === 1 ? "" : "s"} not pushed`);
+    const at = new Date(status.synced_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const parts = [`Synced ${at}`];
     if (status.conflicts.length) parts.push(`⚠ ${status.conflicts.length} sync conflict${status.conflicts.length === 1 ? "" : "s"}`);
     host.textContent = parts.join(" · ");
     host.title = status.conflicts.length
       ? `The sync client made conflict copies: ${status.conflicts.join(", ")}. Compare them with the shared files by hand; nothing was lost, since every change is also in its author's own folder.`
-      : "Press Refresh to write your common changes into the shared files.";
-    host.hidden = !parts.length;
+      : "When this tool last read the study folder. Press Refresh to read it again.";
+    host.hidden = false;
   } catch (_) {
     host.hidden = true;
   }

@@ -326,3 +326,25 @@ def test_returning_a_code_puts_your_own_code_back_in_your_themes(api):
     mine = next(c for c in ann.get("/api/library/codes").json()["codes"] if c["name"] == "trust")
     assert mine["coder"] == ann.headers["X-Coder"]
     assert ann.get("/api/library/themes").json()["themes"][0]["refs"] == [mine["ref"]]
+
+
+def test_a_failed_drag_into_a_common_theme_leaves_the_card_where_it_was(api, monkeypatch):
+    ann, _, rid, _ = api
+    trust = text_code(ann, rid, "trust")
+    ann.post(f"/api/library/text-codebook/{trust['id']}/move", json={"final": True})
+    common = next(c for c in ann.get("/api/library/codes").json()["codes"] if c["coder"] == "common")
+    shared = ann.post("/api/library/themes", json={"title": "Shared", "box": BOX}).json()["theme"]
+    ann.post(f"/api/library/themes/{shared['id']}/move", json={"final": True})
+    shared_id = next(t["id"] for t in ann.get("/api/library/themes").json()["themes"] if t["coder"] == "common")
+    own = ann.post("/api/library/themes", json={"title": "Own", "box": BOX}).json()["theme"]
+    ann.post("/api/library/canvas/place", json={"ref": common["ref"], "theme_id": own["id"], "x": 40, "y": 120})
+
+    def fail(self):
+        raise OSError("disk full")
+    monkeypatch.setattr(CommonThemeStore, "_write", fail)
+    with pytest.raises(OSError):
+        ann.post("/api/library/canvas/place", json={"ref": common["ref"], "theme_id": shared_id, "moved_from": own["id"], "x": 40, "y": 120})
+
+    monkeypatch.undo()
+    themes = {t["title"]: t["refs"] for t in ann.get("/api/library/themes").json()["themes"]}
+    assert themes["Own"] == [common["ref"]]

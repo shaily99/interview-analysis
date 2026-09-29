@@ -24,7 +24,8 @@ export function openMoveDialog({ kind, code, common }) {
   return new Promise((resolve) => {
     document.getElementById("move-dialog")?.remove();
     const clash = common.find((c) => c.name.toLowerCase() === code.name.toLowerCase());
-    const state = { into: clash ? clash.id : "", rename: "", final: false };
+    // `description` stays null until typed in: the shown one is then kept as it is.
+    const state = { into: clash ? clash.id : "", rename: "", final: false, description: null };
     const overlay = document.createElement("div");
     overlay.id = "move-dialog";
     overlay.className = "login";
@@ -44,7 +45,7 @@ export function openMoveDialog({ kind, code, common }) {
       const target = common.find((c) => c.id === state.into);
       return {
         final: state.final,
-        description: overlay.querySelector("#move-description").value,
+        ...(state.description !== null ? { description: state.description } : {}),
         ...(merging ? { into: state.into } : {}),
         ...(!merging && state.rename.trim() ? { name: state.rename.trim() } : {}),
         _target: target,
@@ -91,7 +92,7 @@ export function openMoveDialog({ kind, code, common }) {
           }
           <label class="move__check"><input type="checkbox" id="move-final" ${state.final ? "checked" : ""}> This code has been discussed and is final.</label>
           <label class="move__desc">Description${target ? ` of ✓ ${esc(target.name)}` : ""}
-            <textarea id="move-description" rows="3">${esc(target ? target.description || "" : code.description || "")}</textarea>
+            <textarea id="move-description" rows="3">${esc(state.description ?? (target ? target.description || "" : code.description || ""))}</textarea>
             <span class="login__hint">${
               target
                 ? "This is the common code's current description; edit it if merging changes what the code means."
@@ -126,6 +127,9 @@ export function openMoveDialog({ kind, code, common }) {
       overlay.querySelector("#move-into")?.addEventListener("change", (e) => {
         state.into = e.target.value;
         draw();
+      });
+      overlay.querySelector("#move-description").addEventListener("input", (e) => {
+        state.description = e.target.value;
       });
       overlay.querySelector("#move-rename")?.addEventListener("input", (e) => {
         state.rename = e.target.value;

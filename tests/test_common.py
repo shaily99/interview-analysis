@@ -48,14 +48,10 @@ def test_a_deletion_is_kept_so_it_wins_over_older_copies(base):
 def test_refresh_pushes_the_combined_records_into_the_shared_file(base):
     make(base).put("ann", {"id": "k1", "name": "trust"})
     make(base).put("ben", {"id": "k2", "name": "tone"})
-    common = make(base)
-    assert common.pending("ann") == 1
-
-    common.push()
+    make(base).push()
 
     shared = json.loads((base / "common" / "text_codebook.json").read_text())["records"]
     assert sorted(shared) == ["k1", "k2"]
-    assert make(base).pending("ann") == 0
 
 
 def test_a_record_only_in_the_shared_file_is_still_seen(base):

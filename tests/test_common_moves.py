@@ -315,3 +315,55 @@ def test_moving_is_refused_while_one_of_your_quote_files_cannot_be_read(study):
     with pytest.raises(CodebookError):
         move_code(registry, "text", ann, trust, final=True, description="")
     assert registry.books.text(ann).get(trust) is not None
+
+
+# -- a dry run counts the duplicates the real move combines ------------------------
+
+
+def dry_then_real_duplicates(registry, kind, coder, code_id, **kw):
+    dry = move_code(registry, kind, coder, code_id, final=True, description="", dry_run=True, **kw)
+    real = move_code(registry, kind, coder, code_id, final=True, description="", **kw)
+    return dry["duplicates"], real["duplicates"]
+
+
+def test_a_dry_run_counts_a_coders_own_video_spans_that_combine(study):
+    registry, rec, ann, _ = study
+    scroll = video_code(registry, ann, "scroll")
+    # 10.8 is within half a second of 10.4 but not of 10, where the combined span stays.
+    for start, end in ((10, 20), (10.4, 19.6), (10.8, 20), (30, 31)):
+        rec.video_codes.add(ann, {"code_id": scroll, "start": start, "end": end}, registry.books.video(ann), 600)
+
+    assert dry_then_real_duplicates(registry, "video", ann, scroll) == (1, 1)
+
+
+def test_a_dry_run_into_a_common_video_code_counts_both_kinds_of_duplicate(study):
+    registry, rec, ann, ben = study
+    a, b = video_code(registry, ann, "scroll"), video_code(registry, ben, "scroll")
+    rec.video_codes.add(ben, {"code_id": b, "start": 10, "end": 20}, registry.books.video(ben), 600)
+    move_code(registry, "video", ben, b, final=True, description="")
+    for start, end in ((10.2, 20), (30, 31), (30.3, 31.2)):
+        rec.video_codes.add(ann, {"code_id": a, "start": start, "end": end}, registry.books.video(ann), 600)
+
+    into = registry.books.common_video.find("scroll")["id"]
+    assert dry_then_real_duplicates(registry, "video", ann, a, into=into) == (2, 2)
+
+
+def test_a_dry_run_counts_a_coders_own_quotes_on_the_same_words(study):
+    registry, rec, ann, _ = study
+    trust = text_code(registry, ann, "trust")
+    for start in (0, 0, 1):
+        rec.store.create(ann, quote(start, 5, codes=[trust]))
+
+    assert dry_then_real_duplicates(registry, "text", ann, trust) == (1, 1)
+
+
+def test_a_dry_run_into_a_common_text_code_counts_both_kinds_of_duplicate(study):
+    registry, rec, ann, ben = study
+    a, b = text_code(registry, ann, "trust"), text_code(registry, ben, "trust")
+    rec.store.create(ben, quote(codes=[b]))
+    move_code(registry, "text", ben, b, final=True, description="")
+    for start in (0, 0, 1, 1):
+        rec.store.create(ann, quote(start, 5, codes=[a]))
+
+    into = registry.books.common_text.find("trust")["id"]
+    assert dry_then_real_duplicates(registry, "text", ann, a, into=into) == (3, 3)

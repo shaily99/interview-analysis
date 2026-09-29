@@ -142,7 +142,7 @@ body {
   background: var(--paper);
 }
 
-.topbar__identity { min-width: 0; flex: 0 1 auto; }
+.topbar__identity { min-width: 0; flex: 0 1 auto; max-width: 30%; }
 
 .topbar__title {
   margin: 0;
@@ -160,6 +160,8 @@ body {
   font-size: 0.6875rem;
   color: var(--ink-faint);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .topbar__search {
@@ -3028,12 +3030,8 @@ mark.hl--noted::after {
 .seg button + button { border-left: 1px solid var(--rule); }
 .seg button[aria-pressed="true"] { background: var(--marker-wash); color: var(--marker); font-weight: 600; }
 
-.coderbar__who { position: relative; }
-.coderbar__badge { font: inherit; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.375rem; height: 2rem; padding: 0 0.5rem; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-raised); color: var(--ink-soft); cursor: pointer; }
+.coderbar__badge { font: inherit; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.375rem; height: 2rem; padding: 0 0.5rem; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-raised); color: var(--ink-soft); }
 .coderbar__badge b { font-family: var(--mono); font-size: 0.6875rem; color: var(--marker); background: var(--marker-wash); border-radius: 2px; padding: 0 0.3rem; }
-.coderbar__menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 60; display: grid; min-width: 14rem; padding: 0.25rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); }
-.coderbar__menu button { font: inherit; font-size: 0.75rem; text-align: left; border: 0; background: none; color: var(--ink); padding: 0.4rem 0.5rem; border-radius: 2px; cursor: pointer; }
-.coderbar__menu button:hover { background: var(--marker-wash); }
 
 .btn--primary { background: var(--marker); border-color: var(--marker); color: var(--paper); }
 .btn--primary:hover { color: var(--paper); border-color: var(--marker); }

@@ -107,15 +107,18 @@ class CoderDirectory:
                 raise CoderError(f"{coder['name']} already uses the initials {coder['initials']}")
         return initials
 
-    def create(self, name, initials) -> dict:
-        """Add a coder, or continue as the one who already has this name."""
+    def create(self, name, initials=None) -> dict:
+        """Add a coder, or continue as the one who already has this name.
+
+        Without initials, unique ones are made from the name.
+        """
         name = _clean(name)
         if not name:
             raise CoderError("a coder needs a name")
         existing = self.find_by_name(name)
         if existing:
             return existing
-        initials = self._check_initials(initials)
+        initials = self._check_initials(initials or self.suggest(name))
         coder_id = uuid.uuid4().hex[:12]
         store = _CoderFile(self.folder / coder_id / CODER_FILENAME)
         store._data = {"id": coder_id, "name": name, "initials": initials, "created_at": now()}

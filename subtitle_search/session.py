@@ -619,9 +619,6 @@ class RecordingRegistry:
         for common in self._common_sets():
             common.push()
 
-    def pending_common(self, coder: str) -> int:
-        return sum(common.pending(coder) for common in self._common_sets())
-
     def common_conflicts(self) -> list[str]:
         """Sync-conflict copies next to any shared common file, as paths from the study root."""
         found = []

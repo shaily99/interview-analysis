@@ -8,6 +8,7 @@ migration.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
@@ -26,7 +27,7 @@ from .editing import (
 from .alignment import AlignmentError
 from .alignment import available as alignment_available
 from .codebook import CodebookError
-from .common import COMMON, ClashError, claim_returns, history_for, move_code, return_code
+from .common import COMMON, ClashError, _record_history, claim_returns, history_for, move_code, return_code
 from .coders import CoderError
 from .highlights import COLORS, HighlightError
 from .library import (
@@ -102,6 +103,8 @@ def from_environment() -> FastAPI:
 def create_app(registry: RecordingRegistry) -> FastAPI:
     app = FastAPI(title="subtitle-search", docs_url=None, redoc_url=None)
     app.state.registry = registry
+    #: When the folder was last read: at startup, then on each Refresh.
+    synced = {"at": datetime.now(timezone.utc).isoformat()}
 
     def require(recording_id: str) -> Recording:
         recording = registry.get(recording_id)
@@ -162,6 +165,7 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
         coder = request.headers.get("x-coder", "")
         claimed = claim_returns(registry, coder) if coder and registry.coders.get(coder) else 0
         registry.push_common()
+        synced["at"] = datetime.now(timezone.utc).isoformat()
         return {
             "coders": registry.coders.list(),
             "legacy_files": registry.legacy_files,
@@ -486,12 +490,21 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"code": {**code, "coder": coder}, **text_codebook_state()}
 
+    def record_edit(coder: str, kind: str, before: dict, after: dict) -> None:
+        """One history entry for an edit of a common code, naming the fields it changed."""
+        changes = [f for f in ("name", "color", "description") if before.get(f) != after.get(f)]
+        if changes:
+            _record_history(registry, coder, {"action": "edited", "kind": kind, "code_id": after["id"], "name": after["name"],
+                                              "changes": changes, **({"from": before["name"]} if "name" in changes else {})})
+
     @app.patch("/api/library/text-codebook/{code_id}")
     def update_text_code(code_id: str, request: Request, payload: dict = Body(...)) -> dict:
         coder, owner = editor_of(request, registry.books.all_text(), code_id)
         try:
             if owner == COMMON:
+                before = registry.books.common_text.get(code_id)
                 code = registry.books.common_text.update(code_id, payload, coder=coder)
+                record_edit(coder, "text", before, code)
             else:
                 code = registry.books.text(coder).update(code_id, payload)
         except CodebookError as exc:
@@ -508,7 +521,9 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
                 detail=f"{used} quote{'s' if used != 1 else ''} still use this code -- remove it from them or merge it into another",
             )
         if owner == COMMON:
+            name = registry.books.common_text.get(code_id)["name"]
             registry.books.common_text.remove(code_id, coder=coder)
+            _record_history(registry, coder, {"action": "deleted", "kind": "text", "code_id": code_id, "name": name})
         else:
             registry.books.text(coder).remove(code_id)
         drop_from_themes(coder, owner, f"text:{code_id}")
@@ -561,6 +576,9 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
                 continue
             recording.store.update(coder, quote_id, {"codes": [c for c in quote["codes"] if c != code_id]})
             removed += 1
+        if owner == COMMON and removed:
+            _record_history(registry, coder, {"action": "removed", "kind": "text", "code_id": code_id,
+                                              "name": registry.books.common_text.get(code_id)["name"], "removed": removed})
         return {"removed": removed, **text_codebook_state()}
 
     @app.get("/api/library/video-codebook/{code_id}/applications")
@@ -593,6 +611,9 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
                 continue
             recording.video_codes.remove(coder, span_id)
             removed += 1
+        if owner == COMMON and removed:
+            _record_history(registry, coder, {"action": "removed", "kind": "video", "code_id": code_id,
+                                              "name": registry.books.common_video.get(code_id)["name"], "removed": removed})
         return {"removed": removed, **video_codebook_state()}
 
     # -- common codes: moving agreed codes in, and giving them back -------------
@@ -654,10 +675,9 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
         return {"entries": history_for(registry, "video", code_id)}
 
     @app.get("/api/common/status")
-    def common_status(request: Request) -> dict:
-        """How many of your common changes the shared files lack, and any sync conflicts."""
-        coder = request.headers.get("x-coder", "")
-        return {"pending": registry.pending_common(coder) if coder else 0, "conflicts": registry.common_conflicts()}
+    def common_status() -> dict:
+        """When the folder was last read, and any sync conflicts."""
+        return {"synced_at": synced["at"], "conflicts": registry.common_conflicts()}
 
     # -- video codes: spans of time, separate from quotes and their codes --
 
@@ -690,7 +710,9 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
         coder, owner = editor_of(request, registry.books.all_video(), code_id)
         try:
             if owner == COMMON:
+                before = registry.books.common_video.get(code_id)
                 code = registry.books.common_video.update(code_id, payload, coder=coder)
+                record_edit(coder, "video", before, code)
             else:
                 code = registry.books.video(coder).update(code_id, payload)
         except VideoCodeError as exc:
@@ -704,7 +726,9 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
             used = usage_counts(registry).get(code_id, 0)
             if used:
                 raise HTTPException(status_code=400, detail=f"{used} span{'s' if used != 1 else ''} still use this code -- remove them first")
+            name = registry.books.common_video.get(code_id)["name"]
             registry.books.common_video.remove(code_id, coder=coder)
+            _record_history(registry, coder, {"action": "deleted", "kind": "video", "code_id": code_id, "name": name})
             drop_from_themes(coder, owner, f"video:{code_id}")
             return {"deleted": code_id, **video_codebook_state()}
         try:
@@ -1046,13 +1070,12 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
         check_ref(ref, owner)
         moved = _theme_id(payload, "moved_from") if "moved_from" in payload else _MOVED_ABSENT
         try:
-            if moved is not _MOVED_ABSENT:
-                _, source = store_of(request, moved)
-                if source is not target:
-                    source.unplace(ref, moved)
-                    moved = _MOVED_ABSENT
+            source = store_of(request, moved)[1] if moved is not _MOVED_ABSENT else target
+            # Across stores, the card is placed before it is unplaced, so a failed write leaves it in both themes.
             target.place(ref, theme_id, payload.get("x"), payload.get("y"),
-                         **({} if moved is _MOVED_ABSENT else {"moved_from": moved}))
+                         **({"moved_from": moved} if moved is not _MOVED_ABSENT and source is target else {}))
+            if source is not target:
+                source.unplace(ref, moved)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="unknown theme") from exc
         return themes_state(request)
@@ -1159,10 +1182,10 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
 
     @app.get("/api/library/similar")
     def get_similar(
-        ref: str = Query(...), k: int = Query(6, ge=1, le=40), neural: bool = Query(False)
+        request: Request, ref: str = Query(...), k: int = Query(6, ge=1, le=40), neural: bool = Query(False)
     ) -> dict:
         try:
-            model = semantics_for(corpus(), neural)
+            model = semantics_for(corpus_for(request), neural)
             return {"ref": ref, "similar": model.similar(ref, count=k)}
         except SemanticsUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
