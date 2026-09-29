@@ -3030,7 +3030,7 @@ mark.hl--noted::after {
 .seg button + button { border-left: 1px solid var(--rule); }
 .seg button[aria-pressed="true"] { background: var(--marker-wash); color: var(--marker); font-weight: 600; }
 
-.coderbar__badge { font: inherit; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.375rem; height: 2rem; padding: 0 0.5rem; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-raised); color: var(--ink-soft); }
+.coderbar__badge { font: inherit; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.375rem; height: 2rem; padding: 0 0.5rem; border: 1px solid var(--rule); border-radius: 2px; background: var(--paper-raised); color: var(--ink-soft); cursor: pointer; }
 .coderbar__badge b { font-family: var(--mono); font-size: 0.6875rem; color: var(--marker); background: var(--marker-wash); border-radius: 2px; padding: 0 0.3rem; }
 
 .btn--primary { background: var(--marker); border-color: var(--marker); color: var(--paper); }

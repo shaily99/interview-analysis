@@ -143,8 +143,7 @@ export function mountCoderControls(host, { withMode = true, onRefresh } = {}) {
       : "") +
     `<span class="coderbar__pending" id="common-pending" hidden></span>
      <button class="btn" type="button" id="refresh-btn" title="Read what collaborators have synced into the folder, and push your common changes">↻ Refresh</button>
-     <span class="coderbar__badge" id="coder-badge"></span>
-     <button class="btn" type="button" id="coder-switch">Switch</button>`;
+     <button class="coderbar__badge" type="button" id="coder-badge"></button>`;
   host.insertBefore(bar, host.querySelector("#theme-toggle"));
 
   const syncMode = () =>
@@ -176,7 +175,7 @@ export function mountCoderControls(host, { withMode = true, onRefresh } = {}) {
     }
   });
 
-  $("coder-switch").addEventListener("click", () => openLogin());
+  $("coder-badge").addEventListener("click", () => openLogin());
   syncBadge();
   refreshPending();
   window.addEventListener("commonchange", refreshPending);
@@ -186,7 +185,7 @@ function syncBadge() {
   const badge = $("coder-badge");
   if (!badge || !state.me) return;
   badge.innerHTML = `<b>${escapeHtml(state.me.initials)}</b>${escapeHtml(state.me.name)}`;
-  badge.title = `Coding as ${state.me.name}`;
+  badge.title = `Coding as ${state.me.name}. Click to switch.`;
 }
 
 /** A small label for another coder's work: their initials, full name on hover; ✓ for common. */

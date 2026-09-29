@@ -509,7 +509,7 @@ span can cross an interruption and correcting a caption never moves one.
 ## Coders, modes and common codes
 
 - **Login.** On first open, pick your name or type a new one; initials are made
-  from it. There is no password. **Switch** in the header returns to this screen.
+  from it. There is no password. Click your name in the header to switch.
 - **Modes.** The header's switch applies to every page. *Independent* shows your
   work and common codes. *Collaborative* adds everyone else's, labelled with
   initials and read-only.
