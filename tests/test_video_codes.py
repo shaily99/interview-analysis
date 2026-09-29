@@ -52,6 +52,11 @@ def test_reader_keys_cannot_be_code_keys(codebook, key):
         codebook.add({"name": "scroll", "key": key})
 
 
+@pytest.mark.parametrize("key", [",", "."])
+def test_comma_and_full_stop_can_be_code_keys(codebook, key):
+    assert codebook.add({"name": "scroll", "key": key})["key"] == key
+
+
 def test_two_codes_cannot_share_a_key(codebook):
     codebook.add({"name": "scroll", "key": "q"})
 

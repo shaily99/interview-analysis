@@ -537,12 +537,11 @@ def test_video_codes_leave_text_codes_alone(client):
     assert all(t["tag"] != "scroll" for t in http.get("/api/library/vocabulary").json()["tags"])
 
 
-def test_coding_view_is_served(client):
+def test_there_is_no_separate_coding_view(client):
     http, _ = client
-    page = http.get("/code")
-    assert page.status_code == 200
-    assert "coding.js" in page.text
-    assert page.headers["cache-control"] == "no-cache"
+    assert http.get("/code").status_code == 404
+    assert http.get("/static/coding.js").status_code == 404
+    assert 'href="/code"' not in http.get("/reader").text
 
 
 # -- coders ----------------------------------------------------------------------
@@ -856,14 +855,13 @@ def test_transcript_corrections_need_a_known_coder(client):
     assert http.patch(f"/api/recordings/{rid}/cues/c0", json={"text": "Changed."}).status_code == 200
 
 
-def test_the_reader_is_three_panes_and_the_coding_view_has_code_rows(client):
+def test_the_reader_is_three_panes_with_code_rows_and_a_mute_button(client):
     http, _ = client
     reader = http.get("/reader").text
     for marker in ('id="panes"', 'data-pane="video"', 'data-pane="vcodes"', 'data-pane="transcript"',
-                   'data-pane="codes"', 'id="search-drop"', 'id="vc-tiers"'):
+                   'data-pane="codes"', 'id="search-drop"', 'id="vc-tiers"', 'id="mute"'):
         assert marker in reader
     assert http.get("/static/layout.js").status_code == 200
-    assert 'id="vc-tiers"' in http.get("/code").text
 
 
 def test_similar_quotes_follow_the_mode(client):

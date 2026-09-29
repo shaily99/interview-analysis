@@ -2843,6 +2843,12 @@ mark.hl--noted::after {
   z-index: 50;
 }
 
+/* The pop-up for one span on the code rows. */
+.vc-pop { position: fixed; z-index: 60; width: 18rem; display: grid; gap: 0.4rem; padding: 0.5rem; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18); }
+.vc-pop__head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem; font-size: 0.75rem; }
+.vc-pop__head time { color: var(--ink-soft); font-family: var(--mono); font-size: 0.6875rem; }
+.vc-pop .btn--danger { justify-self: start; }
+
 .vc-picker__head {
   font-size: 0.625rem;
   text-transform: uppercase;
@@ -2964,57 +2970,6 @@ mark.hl--noted::after {
 
 .vc-item__code { margin-bottom: 0.25rem; }
 
-
-/* ------------------------------------------------------- the coding view -- */
-
-.coding__workspace {
-  flex: 1 1 auto;
-  display: flex;
-  min-height: 0;
-}
-
-.coding__player {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  border-top: 0;
-}
-
-.coding .dock[data-state="expanded"] .dock__stage {
-  flex: 1 1 auto;
-  height: auto;
-  min-height: 0;
-}
-
-
-.coding__keys {
-  margin: 0;
-  padding: 0 1rem 0.625rem;
-  font-size: 0.6875rem;
-  color: var(--ink-faint);
-}
-
-.coding__keys kbd {
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  border: 1px solid var(--rule);
-  border-radius: 2px;
-  padding: 0 0.25rem;
-  margin-right: 0.125rem;
-  color: var(--ink-soft);
-}
-
-.coding .sidebar { width: 24rem; flex: 0 0 auto; }
-
-/* The picker sits over the video's corner here, not over a dock. */
-.coding .vc-picker { right: calc(24rem + 1rem); bottom: 5.5rem; }
-
-@media (max-width: 60rem) {
-  .coding__workspace { flex-direction: column; }
-  .coding .sidebar { width: auto; flex: 1 1 auto; }
-  .coding .vc-picker { right: 1rem; }
-}
 
 /* ---------------------------------------------------------------- coders -- */
 /*
@@ -3224,8 +3179,6 @@ mark.hl--noted::after {
 .tier-pending { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ink); }
 @media (prefers-reduced-motion: no-preference) { .tier-pending { animation: vc-pulse 1s ease-in-out infinite; } }
 
-.coding__tiers { border-top: 1px solid var(--rule); max-height: 40vh; overflow: auto; }
-.coding__tiers-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 1rem; font-size: 0.625rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
 
 /* ---------------------------------------------------------- code cards -- */
 /* Themes hold codes: a card is a code, coloured by it, opening to its quotes or spans. */

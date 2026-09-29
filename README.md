@@ -213,6 +213,7 @@ playback**, and a "Follow along" button appears to re-attach.
 | `Esc` | clear selection |
 | `i` / `o` | start / end a [video code](#video-codes) at the playhead |
 | `x` | delete your video code under the playhead |
+| `m` | mute / unmute |
 
 ## Correcting the transcript
 
@@ -487,14 +488,14 @@ span under the playhead, with an Undo. Spans may overlap.
 
 - **Rows**, under the video: one row per coder (✓ Common when it has spans, you,
   then others in collaborative mode) over a zoomable window that follows the
-  playhead. Click a span to seek; drag an end of your own span to move it. A name
+  playhead. Click a span to seek there and open a pop-up to change its code, add a note or delete it (read-only for others' spans). Drag an end of your own span to move it. A name
   too long for its span is cut off; hover shows code, coder and times.
 - **List**, the tab beside Rows: every span with its code, times, note, and a
   menu to recode or delete it.
 
-**Coding without the transcript.** **▶ Code video** opens `/code`: the video and
-its code rows only. Same keys, plus `,`/`.` for one-second steps and `m` to mute.
-Both pages re-read the files when they regain focus.
+**Watching without sound.** **🔊** in the video controls (or `m`) mutes; the
+setting is remembered. Collapse the transcript and text code panes for a
+video-only view.
 
 **The codebook.** Each coder has their own; edit it from the strip's ⋯ menu or
 the [Codebook page](#coders-modes-and-common-codes). Spans refer to a code by

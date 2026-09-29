@@ -450,9 +450,7 @@ function cardMarkup(item, card) {
   const applications = open
     ? `<ol class="ccard__apps">${item.applications
         .map((a) => {
-          const link = item.kind === "video"
-            ? `/code?recording=${encodeURIComponent(a.recording_id)}&t=${a.start_time}`
-            : `/reader?recording=${encodeURIComponent(a.recording_id)}&t=${a.start_time}`;
+          const link = `/reader?recording=${encodeURIComponent(a.recording_id)}&t=${a.start_time}`;
           return `<li><a href="${link}" target="_blank" rel="noopener">${escapeHtml(a.recording_title)} · ${formatTime(a.start_time)}</a>${
             a.text ? ` ${escapeHtml(a.text)}` : ""}</li>`;
         })

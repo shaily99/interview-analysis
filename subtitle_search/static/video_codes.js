@@ -50,6 +50,16 @@ export function initVideoCodes(ctx) {
   ctx.el.panelVideoCodes.addEventListener("click", (event) => onPanelClick(ctx, event));
   ctx.el.panelVideoCodes.addEventListener("change", (event) => onPanelChange(ctx, event));
   ctx.el.vcTiers?.addEventListener("pointerdown", (event) => onTierPointer(ctx, event));
+  document.addEventListener("pointerdown", (event) => {
+    if (!event.target.closest("#vc-pop, .vc-bar")) closeSpanPopup();
+  });
+  // Esc closes the pop-up before anything else it would mean.
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && document.getElementById("vc-pop")) {
+      event.stopPropagation();
+      closeSpanPopup();
+    }
+  }, true);
   ctx.el.vcZoom?.addEventListener("click", (event) => {
     const step = event.target.closest("[data-zoom]")?.dataset.zoom;
     if (!step) return;
@@ -85,8 +95,8 @@ export function initVideoCodes(ctx) {
 /**
  * Re-read spans and codebook from disk.
  *
- * The coding view and the reader are separate pages, often open side by side,
- * so whichever one comes back into focus picks up what the other one wrote.
+ * Done when the reader comes back into focus, so edits made in another tab
+ * (the Codebook page, another recording) show up.
  */
 export async function reloadVideoCodes(ctx) {
   if (!ctx.vc || ctx.vc.pending != null || !ctx.el.vcPicker.hidden) return;
@@ -473,6 +483,7 @@ function onTierPointer(ctx, event) {
   const edge = isMine(span) ? event.target.closest(".vc-bar__edge")?.dataset.edge : null;
   if (!edge) {
     seek(ctx, span.start);
+    openSpanPopup(ctx, span, bar);
     return;
   }
 
@@ -514,6 +525,63 @@ function onTierPointer(ctx, event) {
   // the file never disagree.
   bar.addEventListener("pointercancel", up);
   bar.addEventListener("lostpointercapture", up);
+}
+
+/* -------------------------------------------------------- span pop-up -- */
+
+// Clicking a span on the rows opens this beside it: your own span can be
+// recoded, noted or deleted; anyone else's is shown read-only.
+function closeSpanPopup() {
+  const pop = document.getElementById("vc-pop");
+  // Closing saves a note still being typed, so a click away never drops it.
+  pop?.saveNote?.();
+  pop?.remove();
+}
+
+function openSpanPopup(ctx, span, bar) {
+  closeSpanPopup();
+  const own = isMine(span);
+  const pop = document.createElement("div");
+  pop.id = "vc-pop";
+  pop.className = "vc-pop";
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", "Video code");
+  const head = () => {
+    const code = codeOf(ctx, span.code_id);
+    return `<span class="vc-swatch vc--${code ? code.color : "slate"}"></span>
+      <b>${esc(code ? code.name : "unknown code")}</b>${own ? "" : coderTag(span.coder)}
+      <time>${formatTime(span.start)}–${formatTime(span.end)}</time>
+      <span class="vc-item__len">${formatDuration(span.end - span.start)}</span>`;
+  };
+  pop.innerHTML = `<div class="vc-pop__head">${head()}</div>` + (own
+    ? `<select class="vc-item__code" aria-label="Video code">${myCodes(ctx)
+        .map((c) => `<option value="${c.id}"${c.id === span.code_id ? " selected" : ""}>${esc(c.name)}</option>`)
+        .join("")}</select>
+      <textarea class="quote__note" rows="2" placeholder="Note">${esc(span.note || "")}</textarea>
+      <button class="btn btn--danger" type="button" data-pop="delete">Delete</button>`
+    : span.note ? `<p class="quote__note-text">${esc(span.note)}</p>` : "");
+  document.body.appendChild(pop);
+
+  const r = bar.getBoundingClientRect();
+  pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
+  const below = r.bottom + 4;
+  pop.style.top = `${below + pop.offsetHeight > innerHeight ? Math.max(8, r.top - pop.offsetHeight - 4) : below}px`;
+
+  if (!own) return;
+  pop.querySelector("select").addEventListener("change", async (event) => {
+    await patchSpan(ctx, span.id, { code_id: event.target.value });
+    pop.querySelector(".vc-pop__head").innerHTML = head();
+  });
+  const note = pop.querySelector("textarea");
+  pop.saveNote = () => {
+    if (note.value !== (span.note || "")) patchSpan(ctx, span.id, { note: note.value });
+  };
+  note.addEventListener("change", pop.saveNote);
+  pop.querySelector('[data-pop="delete"]').addEventListener("click", () => {
+    pop.saveNote = null;
+    closeSpanPopup();
+    removeSpan(ctx, span);
+  });
 }
 
 /* ------------------------------------------------------ active marking -- */

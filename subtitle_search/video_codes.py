@@ -30,10 +30,10 @@ SPANS_FILENAME = "video_codes.json"
 LEGACY_CODEBOOK_FILENAME = "library.video_codebook.json"
 LEGACY_SPANS_FILENAME = "session.video_codes.json"
 
-#: Keys the reader and the coding view already use. A code hotkey that shadowed one would silently
+#: Keys the reader already uses. A code hotkey that shadowed one would silently
 #: stop that key working. Speaker keys are checked in the browser, since the
 #: roster lives in each transcript rather than here.
-RESERVED_KEYS = frozenset("jkhcefs/[]iox,.m 0123456789")
+RESERVED_KEYS = frozenset("jkhcefs/[]ioxm 0123456789")
 
 
 #: Raised for both codebook and span errors; one error type keeps the routes simple.

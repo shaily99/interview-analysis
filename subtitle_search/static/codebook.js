@@ -148,9 +148,7 @@ function renderPage() {
     .sort((a, b) => a.recording_title.localeCompare(b.recording_title) || (a.start_time ?? a.start) - (b.start_time ?? b.start))
     .map((a) => {
       const at = a.start_time ?? a.start;
-      const link = state.kind === "text"
-        ? `/reader?recording=${encodeURIComponent(a.recording_id)}&t=${at}`
-        : `/code?recording=${encodeURIComponent(a.recording_id)}&t=${at}`;
+      const link = `/reader?recording=${encodeURIComponent(a.recording_id)}&t=${at}`;
       const what = state.kind === "text"
         ? `<span class="cbook__quote">“${esc(a.text)}”</span>${a.speaker ? `<span class="cbook__speaker">${esc(a.speaker)}</span>` : ""}`
         : `<span class="cbook__len">${Math.round((a.end - a.start) * 10) / 10}s</span>${a.note ? `<span class="cbook__speaker">${esc(a.note)}</span>` : ""}`;

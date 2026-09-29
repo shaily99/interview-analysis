@@ -68,7 +68,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 #: The HTML entry points. Held to the same revalidation rule as the scripts, so a
 #: page and its modules can never come from two different versions of the tool.
-PAGES = {"/", "/reader", "/themes", "/code", "/codebook"}
+PAGES = {"/", "/reader", "/themes", "/codebook"}
 
 #: Tells "the client said nothing about where this card came from" apart from
 #: "it came from the bare canvas", which is a real answer and arrives as null.
@@ -1261,12 +1261,6 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
     def codebook_page() -> FileResponse:
         # Each codebook in full, with every use of a code across the study.
         return FileResponse(STATIC_DIR / "codebook.html")
-
-    @app.get("/code")
-    def coding_page() -> FileResponse:
-        # Coding the video on its own: the recording and its video codes, no
-        # transcript. It writes the same files the reader shows.
-        return FileResponse(STATIC_DIR / "coding.html")
 
     @app.middleware("http")
     async def revalidate_assets(request: Request, call_next):

@@ -459,7 +459,7 @@ async function load() {
   initSearch(ctx);
   initHighlights(ctx);
   initVideoCodes(ctx);
-  $("coding-link").href = `/code?recording=${encodeURIComponent(ctx.recordingId)}`;
+  initMute();
   window.addEventListener("focus", () => reloadVideoCodes(ctx).catch(() => {}));
 
   // Whose work is on screen changes with the mode, or when you code as someone else.
@@ -700,6 +700,24 @@ async function assignSpeaker(ctx, speaker) {
   }
 }
 
+/* ---------------------------------------------------------------- mute -- */
+
+// Watching what is on screen without what is said. Remembered per browser.
+const MUTE_KEY = "subtitle-search:muted";
+
+function setMuted(muted) {
+  const button = $("mute");
+  ctx.el.media.muted = muted;
+  remember(MUTE_KEY, muted ? "1" : "0");
+  button.setAttribute("aria-pressed", String(muted));
+  button.textContent = muted ? "🔇 Muted" : "🔊 Sound on";
+}
+
+function initMute() {
+  setMuted(recall(MUTE_KEY) === "1");
+  $("mute").addEventListener("click", () => setMuted(!ctx.el.media.muted));
+}
+
 /* -------------------------------------------------------------- keyboard -- */
 
 const TYPING = new Set(["INPUT", "TEXTAREA", "SELECT"]);
@@ -780,6 +798,10 @@ document.addEventListener("keydown", (event) => {
     case "c":
       event.preventDefault();
       copySelection(ctx);
+      break;
+    case "m":
+      event.preventDefault();
+      setMuted(!ctx.el.media.muted);
       break;
     case "f":
       event.preventDefault();

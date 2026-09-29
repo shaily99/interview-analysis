@@ -35,7 +35,6 @@
 
   <div class="topbar__actions">
     <a class="btn" id="library-link" href="/" hidden>← Library</a>
-    <a class="btn" id="coding-link" href="/code" title="Code the video without the transcript">▶ Code video</a>
     <a class="btn" href="/codebook" title="Every text and video code, and where each is used">Codebook</a>
     <button class="btn btn--icon" id="theme-toggle" type="button" title="Switch theme" aria-label="Switch theme">◐</button>
   </div>
@@ -61,6 +60,7 @@
           <span class="clock" id="clock">0:00</span>
           <input class="scrub" id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
           <span class="clock clock--muted" id="duration">0:00</span>
+          <button class="btn" id="mute" type="button" aria-pressed="false" title="Mute (m)">🔊 Sound on</button>
           <label class="rate">
             <span class="rate__label">speed</span>
             <select class="rate__select" id="rate" aria-label="Playback speed">
