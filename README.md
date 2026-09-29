@@ -488,7 +488,7 @@ span under the playhead, with an Undo. Spans may overlap.
 
 - **Rows**, under the video: one row per coder (✓ Common when it has spans, you,
   then others in collaborative mode) over a zoomable window that follows the
-  playhead. Click a span to seek there and open a pop-up to change its code, add a note or delete it (read-only for others' spans). Drag an end of your own span to move it. A name
+  playhead. Click a span to seek there and open a pop-up to change its code or its start and end times (typed as `1:02.5`), add a note, or delete it (read-only for others' spans). Drag an end of your own span to move it. A name
   too long for its span is cut off; hover shows code, coder and times.
 - **List**, the tab beside Rows: every span with its code, times, note, and a
   menu to recode or delete it.

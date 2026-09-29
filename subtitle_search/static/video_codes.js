@@ -533,9 +533,22 @@ function onTierPointer(ctx, event) {
 // recoded, noted or deleted; anyone else's is shown read-only.
 function closeSpanPopup() {
   const pop = document.getElementById("vc-pop");
-  // Closing saves a note still being typed, so a click away never drops it.
-  pop?.saveNote?.();
+  // Closing saves a note or time still being typed, so a click away never drops it.
+  pop?.save?.();
   pop?.remove();
+}
+
+/** A time as the pop-up's boxes show it: m:ss.t, or h:mm:ss.t. */
+function clockText(seconds) {
+  const tenths = Math.round(seconds * 10);
+  return `${formatTime(Math.floor(tenths / 10))}.${tenths % 10}`;
+}
+
+/** Read m:ss, h:mm:ss or plain seconds, each with optional decimals; null if it is not a time. */
+function parseClock(text) {
+  const parts = text.trim().split(":");
+  if (parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) return null;
+  return parts.reduce((total, p) => total * 60 + Number(p), 0);
 }
 
 function openSpanPopup(ctx, span, bar) {
@@ -546,15 +559,22 @@ function openSpanPopup(ctx, span, bar) {
   pop.className = "vc-pop";
   pop.setAttribute("role", "dialog");
   pop.setAttribute("aria-label", "Video code");
+  // The span as last saved; a focus reload can replace the object this opened with.
+  const live = () => ctx.vc.spans.find((s) => s.id === span.id) || span;
   const head = () => {
-    const code = codeOf(ctx, span.code_id);
+    const now = live();
+    const code = codeOf(ctx, now.code_id);
     return `<span class="vc-swatch vc--${code ? code.color : "slate"}"></span>
-      <b>${esc(code ? code.name : "unknown code")}</b>${own ? "" : coderTag(span.coder)}
-      <time>${formatTime(span.start)}–${formatTime(span.end)}</time>
-      <span class="vc-item__len">${formatDuration(span.end - span.start)}</span>`;
+      <b>${esc(code ? code.name : "unknown code")}</b>${own ? "" : coderTag(now.coder)}
+      <time>${formatTime(now.start)}–${formatTime(now.end)}</time>
+      <span class="vc-item__len">${formatDuration(now.end - now.start)}</span>`;
   };
   pop.innerHTML = `<div class="vc-pop__head">${head()}</div>` + (own
-    ? `<select class="vc-item__code" aria-label="Video code">${myCodes(ctx)
+    ? `<div class="vc-pop__times">
+        <label>Start <input type="text" data-time="start" value="${clockText(span.start)}" spellcheck="false"></label>
+        <label>End <input type="text" data-time="end" value="${clockText(span.end)}" spellcheck="false"></label>
+      </div>
+      <select class="vc-item__code" aria-label="Video code">${myCodes(ctx)
         .map((c) => `<option value="${c.id}"${c.id === span.code_id ? " selected" : ""}>${esc(c.name)}</option>`)
         .join("")}</select>
       <textarea class="quote__note" rows="2" placeholder="Note">${esc(span.note || "")}</textarea>
@@ -573,12 +593,43 @@ function openSpanPopup(ctx, span, bar) {
     pop.querySelector(".vc-pop__head").innerHTML = head();
   });
   const note = pop.querySelector("textarea");
-  pop.saveNote = () => {
-    if (note.value !== (span.note || "")) patchSpan(ctx, span.id, { note: note.value });
+  const saveNote = () => {
+    if (note.value !== (live().note || "")) patchSpan(ctx, span.id, { note: note.value });
   };
-  note.addEventListener("change", pop.saveNote);
+  const saveTime = async (input) => {
+    const which = input.dataset.time;
+    const current = live();
+    const value = parseClock(input.value);
+    if (value === null || Math.abs(value - current[which]) < 0.05) {
+      input.value = clockText(current[which]);
+      return;
+    }
+    const start = which === "start" ? value : current.start;
+    const end = which === "end" ? value : current.end;
+    if (end - start < 0.1 || end > durationOf(ctx)) {
+      ctx.notify("The end has to come after the start, within the recording.", { kind: "warn" });
+      input.value = clockText(current[which]);
+      return;
+    }
+    await patchSpan(ctx, span.id, { [which]: value });
+    renderAll(ctx);
+    input.value = clockText(live()[which]);
+    pop.querySelector(".vc-pop__head").innerHTML = head();
+  };
+  const times = [...pop.querySelectorAll("[data-time]")];
+  for (const input of times) {
+    input.addEventListener("change", () => saveTime(input));
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") input.blur();
+    });
+  }
+  pop.save = () => {
+    saveNote();
+    times.forEach(saveTime);
+  };
+  note.addEventListener("change", saveNote);
   pop.querySelector('[data-pop="delete"]').addEventListener("click", () => {
-    pop.saveNote = null;
+    pop.save = null;
     closeSpanPopup();
     removeSpan(ctx, span);
   });

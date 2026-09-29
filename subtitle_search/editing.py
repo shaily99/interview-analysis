@@ -128,7 +128,7 @@ def normalize_edit(text: str) -> str:
 
 #: Keys the reader already uses. A speaker cannot take one, or naming somebody
 #: would quietly break navigation.
-RESERVED_KEYS = set("jkechfs/[]")
+RESERVED_KEYS = set("jkechfs/[]ioxm")
 
 
 def apply_roster_edit(recording, entries: list[dict]) -> dict:

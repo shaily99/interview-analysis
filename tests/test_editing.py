@@ -7,6 +7,7 @@ from subtitle_search.editing import (
     apply_cue_edit,
     apply_cue_merge,
     apply_cue_split,
+    apply_roster_edit,
     apply_selection_speaker,
     apply_speaker_edit,
     backup_path,
@@ -957,3 +958,9 @@ def test_assigning_a_name_in_another_case_does_not_add_a_second_speaker(one_voic
     transcript = one_voice.transcript
     assert [e["name"] for e in transcript.roster] == ["Rafael Ortiz"]
     assert transcript.cue("c3").speaker == "Rafael Ortiz"
+
+
+@pytest.mark.parametrize("key", ["i", "o", "x", "m"])
+def test_video_code_and_mute_keys_cannot_be_speaker_keys(one_voice, key):
+    with pytest.raises(EditError):
+        apply_roster_edit(one_voice, [{"name": "Rafael Ortiz", "key": key}])
