@@ -79,10 +79,18 @@ const current = () => state.codes.find((c) => c.id === state.codeId);
 //: The rows the open page lists, before any search or filter.
 const pageRows = () => (uncodedGroup() ? state.uncoded.filter((q) => groupOf(q) === uncodedGroup()) : state.applications);
 
+//: Who is behind a row: for a common one, each coder who put this code on it (`coders` from the server).
+const codersOf = (r) => (r.coders?.length ? r.coders : [r.coder]);
+const coderCell = (r) => codersOf(r).map(coderTag).join(" ");
+//: A row's note; a common row keeps one per coder, each labelled with its coder.
+const noteCell = (r) => (r.notes?.length ? r.notes.map((n) => `${coderTag(n.coder)} ${esc(n.note)}`).join(" · ") : esc(r.note || ""));
+const noteText = (r) => [r.note || "", ...(r.notes || []).map((n) => n.note || "")].join(" ");
+
 //: The table's column filters: the value each row is filtered on, and the name shown in the checklist.
+//: The Coder filter lists each combination of coders, so rows both coded can be told from rows one coded.
 const FILTERS = {
   recording: { label: "Recording", value: (r) => r.recording_id, name: (r) => r.recording_title },
-  coder: { label: "Coder", value: (r) => r.coder ?? "", name: (r) => nameOf(r.coder) },
+  coder: { label: "Coder", value: (r) => codersOf(r).join("+"), name: (r) => codersOf(r).map(nameOf).join(" + ") },
 };
 
 //: The rows that pass the table search and every column filter.
@@ -90,7 +98,7 @@ function visibleRows(rows) {
   const q = state.pageQuery.toLowerCase();
   return rows.filter(
     (r) =>
-      (!q || (r.text || "").toLowerCase().includes(q) || (r.note || "").toLowerCase().includes(q)) &&
+      (!q || (r.text || "").toLowerCase().includes(q) || noteText(r).toLowerCase().includes(q)) &&
       Object.entries(FILTERS).every(([key, f]) => !state.hidden[key].has(f.value(r)))
   );
 }
@@ -250,8 +258,8 @@ function renderUncoded(group) {
         <td>${esc(q.recording_title)}</td>
         <td class="cbook__time">${rowCells(q)}</td>
         <td><span class="cbook__quote">“${esc(q.text)}”</span>${q.speaker ? `<span class="cbook__speaker">${esc(q.speaker)}</span>` : ""}</td>
-        <td>${esc(q.note || "")}</td>
-        <td>${coderTag(q.coder)}</td>
+        <td>${noteCell(q)}</td>
+        <td>${coderCell(q)}</td>
         <td><a class="cbook__jump" href="${link}" target="_blank" rel="noopener">${state.kind === "conversation" ? "open" : "▶ open"}</a></td>
       </tr>`;
     })
@@ -298,8 +306,8 @@ function renderPage() {
         <td>${esc(a.recording_title)}</td>
         <td class="cbook__time">${rowCells(a)}</td>
         <td>${what}</td>
-        <td>${esc(a.note || "")}</td>
-        <td>${coderTag(a.coder)}</td>
+        <td>${noteCell(a)}</td>
+        <td>${coderCell(a)}</td>
         <td><a class="cbook__jump" href="${link}" target="_blank" rel="noopener">${state.kind === "conversation" ? "open" : "▶ open"}</a></td>
       </tr>`;
     })

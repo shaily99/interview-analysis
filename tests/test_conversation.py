@@ -37,6 +37,7 @@ def test_raw_html_escaped_and_links_inert(tmp_path):
     html = load_conversation(tmp_path).html
     assert "&lt;script&gt;" in html
     assert 'data-href="http://e.com"' in html
+    assert 'title="http://e.com"' in html
     assert "href=" not in html.replace("data-href=", "")
 
 

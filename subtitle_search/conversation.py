@@ -36,11 +36,15 @@ _MARKDOWN = MarkdownIt("commonmark", {"html": False})
 
 
 def _inert_link_open(renderer, tokens, idx, options, env):
-    """Render a link's opening tag with its address under `data-href` in place of `href`."""
+    """Render a link's opening tag with its address under `data-href` and `title` in place of `href`.
+
+    The link stays inert, but is styled as one and shows the address on hover, as the participant saw it.
+    """
     token = tokens[idx]
     href = token.attrs.pop("href", None)
     if href is not None:
         token.attrSet("data-href", href)
+        token.attrSet("title", href)
     return renderer.renderToken(tokens, idx, options, env)
 
 

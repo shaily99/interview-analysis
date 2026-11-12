@@ -3228,6 +3228,8 @@ mark.hl--noted::after {
 [data-pane="conversation"] .tf-reply h6 { margin: 0.6rem 0 0.22rem; font-size: 1em; font-weight: 700; }
 [data-pane="conversation"] .tf-reply pre { overflow-x: auto; }
 [data-pane="conversation"] .tf-reply code { font-family: var(--mono); font-size: 0.9em; }
+/* A link the participant saw: styled as one, its address on hover, but inert (conversation.py _inert_link_open). */
+[data-pane="conversation"] .tf-reply a[data-href] { color: var(--marker); text-decoration: underline; text-underline-offset: 2px; cursor: help; }
 [data-pane="conversation"] .tf-reply blockquote { margin: 0 0 0.55rem; padding-left: 0.6rem; border-left: 2px solid var(--rule); color: var(--ink-soft); }
 /* Closes a reply that stopped part way, set apart so it does not read as the reply's last sentence. */
 [data-pane="conversation"] .tf-reply .tf-cut { margin: 0.65rem 0 0; padding-top: 0.45rem; border-top: 1px solid var(--rule); font-size: 0.72rem; font-style: italic; color: var(--ink-faint); }

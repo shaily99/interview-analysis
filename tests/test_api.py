@@ -883,6 +883,48 @@ def test_removing_a_common_codes_quotes_from_the_code_page(client):
     assert other.delete(f"/api/library/text-codebook/{common_id}").status_code == 200
 
 
+def test_a_common_codes_applications_say_which_coders_put_it_there(client):
+    http, rid = client
+    other, them = as_coder(http, "Rachel K.", "RK")
+    me = http.headers["X-Coder"]
+    shared = {**QUOTE}
+    mine_only = {"text": "Cool", "start_cue_id": "c0", "start_char_offset": 0, "end_cue_id": "c0", "end_char_offset": 4}
+    theirs_only = {"text": "And", "start_cue_id": "c0", "start_char_offset": 6, "end_cue_id": "c0", "end_char_offset": 9}
+
+    a = http.post("/api/library/text-codebook", json={"name": "trust"}).json()["code"]
+    b = other.post("/api/library/text-codebook", json={"name": "trust"}).json()["code"]
+    for quote in (shared, mine_only):
+        http.post(f"/api/recordings/{rid}/highlights", json={**quote, "codes": [a["id"]], "note": f"mine {quote['text']}"})
+    for quote in (shared, theirs_only):
+        other.post(f"/api/recordings/{rid}/highlights", json={**quote, "codes": [b["id"]], "note": f"theirs {quote['text']}"})
+    http.post(f"/api/library/text-codebook/{a['id']}/move", json={"final": True})
+    common_id = next(c["id"] for c in http.get("/api/library/text-codebook").json()["codes"] if c["coder"] == "common")
+    assert other.post(f"/api/library/text-codebook/{b['id']}/move", json={"final": True, "into": common_id}).status_code == 200
+
+    rows = {r["text"]: r for r in http.get(f"/api/library/text-codebook/{common_id}/applications").json()["applications"]}
+    assert rows["Cool"]["coders"] == [me]
+    assert rows["And"]["coders"] == [them["id"]]
+    assert rows["Cool."]["coders"] == sorted([me, them["id"]])
+    assert {n["note"] for n in rows["Cool."]["notes"]} == {"mine Cool.", "theirs Cool."}
+
+
+def test_a_common_video_codes_spans_say_which_coders_put_them_there(client):
+    http, rid = client
+    other, them = as_coder(http, "Rachel K.", "RK")
+    me = http.headers["X-Coder"]
+    a = http.post("/api/library/video-codebook", json={"name": "scroll"}).json()["code"]
+    b = other.post("/api/library/video-codebook", json={"name": "scroll"}).json()["code"]
+    http.post(f"/api/recordings/{rid}/video-codes", json={"code_id": a["id"], "start": 1, "end": 2, "note": "mine"})
+    other.post(f"/api/recordings/{rid}/video-codes", json={"code_id": b["id"], "start": 1.2, "end": 2.1, "note": "theirs"})
+    http.post(f"/api/library/video-codebook/{a['id']}/move", json={"final": True})
+    common_id = next(c["id"] for c in http.get("/api/library/video-codebook").json()["codes"] if c["coder"] == "common")
+    other.post(f"/api/library/video-codebook/{b['id']}/move", json={"final": True, "into": common_id})
+
+    [row] = http.get(f"/api/library/video-codebook/{common_id}/applications").json()["applications"]
+    assert row["coders"] == sorted([me, them["id"]])
+    assert {(n["coder"], n["note"]) for n in row["notes"]} == {(me, "mine"), (them["id"], "theirs")}
+
+
 def test_transcript_corrections_need_a_known_coder(client):
     http, rid = client
     anonymous = TestClient(http.app)

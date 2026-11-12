@@ -594,12 +594,32 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
         recording_id, _, item_id = str(ref).partition(":")
         return require(recording_id), item_id
 
+    def who_coded(item: dict, code_id: str) -> dict:
+        """Who is behind one row of a code, and their notes.
+
+        A common item is everyone's, but each coder who put the code on it is
+        kept as a contribution; for a quote or highlight carrying several codes,
+        only those who put *this* code on it count.
+        """
+        if item.get("coder") != COMMON:
+            return {"coders": [item.get("coder")], "notes": []}
+        if "pairs" in item:
+            parts = next((p["contributors"] for p in item["pairs"] if p["code_id"] == code_id), [])
+        else:
+            parts = item.get("parts", [])
+        notes, seen = [], set()
+        for p in parts:
+            if p.get("note") and (p["coder"], p["note"]) not in seen:
+                seen.add((p["coder"], p["note"]))
+                notes.append({"coder": p["coder"], "note": p["note"]})
+        return {"coders": sorted({p["coder"] for p in parts}), "notes": notes}
+
     @app.get("/api/library/text-codebook/{code_id}/applications")
     def text_code_applications(code_id: str) -> dict:
         owner_of(registry.books.all_text(), code_id)
         return {
             "applications": [
-                {**q, "ref": f"{r.id}:{q['id']}", "recording_id": r.id, "recording_title": r.title}
+                {**q, "ref": f"{r.id}:{q['id']}", "recording_id": r.id, "recording_title": r.title, **who_coded(q, code_id)}
                 for r in registry.list()
                 for q in r.store.list()
                 if code_id in (q.get("codes") or [])
@@ -642,7 +662,7 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
         owner_of(registry.books.all_video(), code_id)
         return {
             "applications": [
-                {**s, "ref": f"{r.id}:{s['id']}", "recording_id": r.id, "recording_title": r.title}
+                {**s, "ref": f"{r.id}:{s['id']}", "recording_id": r.id, "recording_title": r.title, **who_coded(s, code_id)}
                 for r in registry.list()
                 for s in r.video_codes.list()
                 if s.get("code_id") == code_id
@@ -770,7 +790,7 @@ def create_app(registry: RecordingRegistry) -> FastAPI:
         owner_of(registry.books.all_conversation(), code_id)
         return {
             "applications": [
-                highlight_row(r, h)
+                {**highlight_row(r, h), **who_coded(h, code_id)}
                 for r in registry.list()
                 for h in r.conversation_highlights.list()
                 if code_id in (h.get("codes") or [])
